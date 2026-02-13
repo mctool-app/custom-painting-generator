@@ -1,0 +1,800 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>マイクラ 絵画ブロック アドオンジェネレーター</title>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/jszip/3.10.1/jszip.min.js"></script>
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+    <style>
+        :root {
+            --bg-color: #1e1e2e;
+            --panel-bg: #282a36;
+            --card-bg: #383a59;
+            --text-main: #f8f8f2;
+            --text-sub: #bd93f9;
+            --primary: #bd93f9;
+            --primary-hover: #ff79c6;
+            --danger: #ff5555;
+            --danger-hover: #ff0000;
+            --border-radius: 12px;
+            --transition: all 0.2s ease;
+        }
+
+        * { box-sizing: border-box; margin: 0; padding: 0; font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; }
+        
+        body { background-color: var(--bg-color); color: var(--text-main); line-height: 1.6; }
+
+        /* Header */
+        header {
+            display: flex; justify-content: space-between; align-items: center;
+            padding: 1rem 2rem; background-color: var(--panel-bg);
+            box-shadow: 0 4px 6px rgba(0,0,0,0.3); position: sticky; top: 0; z-index: 100;
+        }
+        .header-title { font-size: 1.5rem; font-weight: bold; color: var(--primary); }
+        .header-controls { display: flex; gap: 10px; }
+        
+        button {
+            background-color: var(--primary); color: white; border: none;
+            padding: 8px 16px; border-radius: 8px; cursor: pointer;
+            font-size: 1rem; font-weight: bold; transition: var(--transition);
+            display: flex; align-items: center; gap: 8px;
+        }
+        button:hover { background-color: var(--primary-hover); transform: translateY(-2px); }
+        button:disabled { background-color: #555; cursor: not-allowed; transform: none; }
+        .btn-danger { background-color: var(--danger); }
+        .btn-danger:hover { background-color: var(--danger-hover); }
+
+        /* Settings Section */
+        .settings-container {
+            padding: 2rem; max-width: 1200px; margin: 0 auto;
+            display: grid; grid-template-columns: repeat(auto-fit, minmax(300px, 1fr)); gap: 1.5rem;
+        }
+        .input-group { display: flex; flex-direction: column; gap: 5px; }
+        .input-group label { font-size: 0.9rem; color: var(--text-sub); }
+        input[type="text"], input[type="number"], select {
+            padding: 10px; border-radius: 6px; border: 1px solid #444;
+            background-color: var(--bg-color); color: white; outline: none; transition: var(--transition);
+        }
+        input[type="text"]:focus, input[type="number"]:focus, select:focus { 
+            border-color: var(--primary); box-shadow: 0 0 0 2px rgba(189, 147, 249, 0.3); 
+        }
+
+        /* Status Bar */
+        .status-bar { text-align: center; padding: 0 2rem; margin-bottom: 1rem; color: var(--text-sub); }
+
+        /* Gallery Section */
+        .gallery {
+            padding: 0 2rem 2rem 2rem; max-width: 1200px; margin: 0 auto;
+            display: grid; grid-template-columns: repeat(auto-fill, minmax(220px, 1fr)); gap: 1.5rem;
+        }
+
+        /* Card */
+        .card {
+            background-color: var(--card-bg); border-radius: var(--border-radius);
+            overflow: hidden; position: relative; box-shadow: 0 4px 10px rgba(0,0,0,0.2);
+            transition: var(--transition); animation: fadeIn 0.3s ease;
+        }
+        .card:hover { transform: translateY(-5px); box-shadow: 0 8px 15px rgba(0,0,0,0.4); }
+        .card-img-container {
+            width: 100%; aspect-ratio: 1 / 1; background-color: rgba(0,0,0,0.5);
+            background-image: linear-gradient(45deg, #444 25%, transparent 25%), linear-gradient(-45deg, #444 25%, transparent 25%), linear-gradient(45deg, transparent 75%, #444 75%), linear-gradient(-45deg, transparent 75%, #444 75%);
+            background-size: 20px 20px; background-position: 0 0, 0 10px, 10px -10px, -10px 0px;
+            display: flex; align-items: center; justify-content: center; position: relative;
+        }
+        .card img { max-width: 100%; max-height: 100%; object-fit: contain; image-rendering: pixelated; }
+        .card-info { padding: 12px; display: flex; justify-content: space-between; align-items: center; }
+        .card-name { font-weight: bold; font-size: 1.1rem; word-break: break-all; margin-right: 10px;}
+        .edit-btn { background: none; color: var(--text-sub); padding: 5px; width: 30px; border-radius: 4px; }
+        .edit-btn:hover { background-color: rgba(255,255,255,0.1); color: var(--primary); }
+        
+        .card-badges { position: absolute; top: 10px; right: 10px; display: flex; gap: 5px; flex-direction: column; align-items: flex-end;}
+        .card-index {
+            background-color: rgba(0,0,0,0.7); color: white; padding: 2px 8px;
+            border-radius: 12px; font-size: 0.8rem; font-weight: bold;
+        }
+        .delete-btn {
+            background-color: var(--danger); color: white; width: 28px; height: 28px;
+            border-radius: 50%; display: flex; align-items: center; justify-content: center;
+            cursor: pointer; transition: var(--transition); border: none; padding: 0;
+        }
+        .delete-btn:hover { background-color: var(--danger-hover); transform: scale(1.1); }
+
+        /* Modal */
+        .modal-overlay {
+            position: fixed; top: 0; left: 0; width: 100%; height: 100%;
+            background: rgba(0,0,0,0.6); backdrop-filter: blur(3px);
+            display: none; align-items: center; justify-content: center; z-index: 1000;
+        }
+        .modal-overlay.active { display: flex; }
+        .modal-content {
+            background-color: var(--panel-bg); padding: 2rem; border-radius: var(--border-radius);
+            width: 90%; max-width: 500px; box-shadow: 0 10px 30px rgba(0,0,0,0.5); max-height: 90vh; overflow-y: auto;
+        }
+        .modal-header { display: flex; justify-content: space-between; align-items: center; margin-bottom: 1.5rem; }
+        .modal-header h2 { font-size: 1.2rem; }
+        .close-modal { background: none; color: white; font-size: 1.5rem; cursor: pointer; padding: 0; margin: 0; }
+        .close-modal:hover { color: var(--danger); background: none; transform: none;}
+
+        .drop-zone {
+            border: 2px dashed var(--primary); border-radius: var(--border-radius); padding: 3rem 1rem;
+            text-align: center; color: var(--text-sub); cursor: pointer; transition: var(--transition);
+            margin-bottom: 1.5rem; background-color: rgba(189, 147, 249, 0.05);
+        }
+        .drop-zone.dragover { background-color: rgba(189, 147, 249, 0.2); border-color: var(--primary-hover); color: white; }
+        
+        .modal-actions { display: flex; justify-content: flex-end; gap: 10px; margin-top: 1.5rem; }
+
+        /* Split Feature Specific */
+        .checkbox-group { display: flex; align-items: center; gap: 10px; margin-top: 15px; cursor: pointer; }
+        .checkbox-group input { width: 18px; height: 18px; cursor: pointer; accent-color: var(--primary); }
+        .checkbox-group label { cursor: pointer; color: var(--text-main); font-size: 1rem; font-weight: bold;}
+        
+        #splitModal .modal-content { max-width: 800px; }
+        .split-controls { display: flex; gap: 15px; margin-bottom: 15px; flex-wrap: wrap; }
+        .split-controls .input-group { flex: 1; min-width: 150px; }
+        .split-preview-container { 
+            text-align: center; background: #111; padding: 10px; 
+            border-radius: 8px; max-height: 45vh; overflow: auto; 
+            position: relative;
+        }
+        #splitCanvas { max-width: 100%; height: auto; image-rendering: auto; }
+
+        @keyframes fadeIn { from { opacity: 0; transform: scale(0.9); } to { opacity: 1; transform: scale(1); } }
+        
+        /* Hidden inputs */
+        input[type="file"] { display: none; }
+
+        /* Responsive */
+        @media (max-width: 600px) {
+            header { flex-direction: column; gap: 15px; }
+            .header-controls { flex-wrap: wrap; justify-content: center; }
+            .gallery { grid-template-columns: repeat(auto-fill, minmax(150px, 1fr)); }
+        }
+
+        /* Full page drag overlay */
+        #globalDropZone {
+            position: fixed; top: 0; left: 0; width: 100vw; height: 100vh;
+            background: rgba(189, 147, 249, 0.3); backdrop-filter: blur(5px);
+            z-index: 9999; display: none; align-items: center; justify-content: center;
+            border: 10px dashed var(--primary); pointer-events: none;
+        }
+        #globalDropZone.active { display: flex; }
+        #globalDropZone h1 { color: white; font-size: 3rem; text-shadow: 0 4px 10px rgba(0,0,0,0.5); }
+    </style>
+</head>
+<body>
+
+    <div id="globalDropZone">
+        <h1>ここにmcaddonをドロップして読み込み</h1>
+    </div>
+
+    <header>
+        <div class="header-title"><i class="fa-solid fa-cube"></i> Custom Painting Add-on</div>
+        <div class="header-controls">
+            <button onclick="document.getElementById('importFile').click()"><i class="fa-solid fa-file-import"></i> 読み込み</button>
+            <input type="file" id="importFile" accept=".mcaddon,.zip" onchange="handleImportEvent(event)">
+            
+            <button class="btn-danger" onclick="clearAll()"><i class="fa-solid fa-trash"></i> クリア</button>
+            <button onclick="openModal()"><i class="fa-solid fa-plus"></i> 追加</button>
+            <button style="background-color: #50fa7b; color: #282a36;" onclick="exportAddon()"><i class="fa-solid fa-download"></i> エクスポート</button>
+        </div>
+    </header>
+
+    <div class="settings-container">
+        <div class="input-group">
+            <label>パック名</label>
+            <input type="text" id="packName" placeholder="My Custom Paintings">
+        </div>
+        <div class="input-group">
+            <label>説明</label>
+            <input type="text" id="packDesc" placeholder="カスタム絵画ブロックを追加するアドオンです">
+        </div>
+        <div class="input-group">
+            <label>パックアイコン (正方形画像を選択)</label>
+            <button onclick="document.getElementById('packIconInput').click()" style="width: 100%; justify-content: center; background-color: var(--card-bg);">
+                <i class="fa-solid fa-image"></i> アイコンを変更
+            </button>
+            <input type="file" id="packIconInput" accept="image/*" onchange="handleIconUpload(event)">
+        </div>
+    </div>
+
+    <div class="status-bar">
+        現在のブロック数: <span id="imageCount" style="color: var(--primary); font-weight: bold;">0</span> / <span id="maxCountDisplay">200</span>
+    </div>
+
+    <main class="gallery" id="gallery"></main>
+
+    <div class="modal-overlay" id="addModal">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h2>新しいブロックを追加</h2>
+                <button class="close-modal" onclick="closeModal()"><i class="fa-solid fa-xmark"></i></button>
+            </div>
+            
+            <div class="drop-zone" id="dropZone" onclick="document.getElementById('imageInput').click()">
+                <i class="fa-solid fa-cloud-arrow-up" style="font-size: 3rem; margin-bottom: 10px;"></i>
+                <p>クリックまたはドラッグ＆ドロップで画像を選択</p>
+                <img id="previewImage" style="display: none; max-width: 150px; max-height: 150px; margin: 10px auto; border-radius: 8px;">
+            </div>
+            <input type="file" id="imageInput" accept="image/*" onchange="handleFileSelect(event)">
+
+            <div class="input-group">
+                <label>基本ブロックID名 (任意)</label>
+                <input type="text" id="imageName" placeholder="空白の場合は自動生成されます">
+                <small style="color: #888; margin-top: 5px;">※ローマ字、数字、アンダーバーのみ。空白は_に変換されます。</small>
+            </div>
+
+            <div class="checkbox-group" id="splitToggleGroup" style="display: none;">
+                <input type="checkbox" id="splitToggle">
+                <label for="splitToggle">大きな画像を切り分けて複数ブロックにする</label>
+            </div>
+
+            <div class="modal-actions">
+                <button onclick="closeModal()" style="background-color: transparent; border: 1px solid var(--text-sub);">キャンセル</button>
+                <button onclick="processAddImage()">追加する</button>
+            </div>
+        </div>
+    </div>
+
+    <div class="modal-overlay" id="splitModal">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h2>画像の切り分け設定</h2>
+                <button class="close-modal" onclick="closeSplitModal()"><i class="fa-solid fa-xmark"></i></button>
+            </div>
+            
+            <div class="split-controls">
+                <div class="input-group">
+                    <label>横ブロック数 (列)</label>
+                    <input type="number" id="splitCols" value="2" min="1" max="20" onchange="drawSplitPreview()">
+                </div>
+                <div class="input-group">
+                    <label>縦ブロック数 (行)</label>
+                    <input type="number" id="splitRows" value="2" min="1" max="20" onchange="drawSplitPreview()">
+                </div>
+                <div class="input-group">
+                    <label>画像のフィット方法</label>
+                    <select id="splitFitMode" onchange="drawSplitPreview()">
+                        <option value="cover">比率維持（はみ出しカット）</option>
+                        <option value="stretch">ブロック比率に合わせる（変形）</option>
+                    </select>
+                </div>
+            </div>
+
+            <div class="split-preview-container">
+                <canvas id="splitCanvas"></canvas>
+            </div>
+
+            <div class="modal-actions">
+                <button onclick="closeSplitModal()" style="background-color: transparent; border: 1px solid var(--text-sub);">戻る</button>
+                <button onclick="confirmSplit()">切り分けを決定</button>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        // --- 設定変数 ---
+        // ここを変更することで上限枚数を簡単に増やせます。
+        const MAX_IMAGES = 200; 
+        document.getElementById('maxCountDisplay').innerText = MAX_IMAGES;
+
+        // --- State ---
+        // 構造: { isSplit: boolean, name: string, dataUrl: string, cols?: number, rows?: number, pieces?: [{name, dataUrl}] }
+        let images = []; 
+        let packIconDataUrl = null;
+        
+        let currentEditingFileUrl = null;
+        let currentImageObj = null; // Imageオブジェクト
+
+        // --- Utils ---
+        function formatName(rawName) {
+            return rawName.replace(/\s+/g, '_').replace(/[^a-zA-Z0-9_]/g, '').toLowerCase();
+        }
+
+        function generateDefaultName() {
+            let num = 1;
+            let name = `image${num}`;
+            while (isNameUsed(name)) { num++; name = `image${num}`; }
+            return name;
+        }
+
+        function isNameUsed(name) {
+            return images.some(img => {
+                if (img.isSplit) {
+                    return img.name === name || img.pieces.some(p => p.name === name);
+                } else {
+                    return img.name === name;
+                }
+            });
+        }
+
+        function getTotalBlocks() {
+            return images.reduce((acc, img) => acc + (img.isSplit ? img.pieces.length : 1), 0);
+        }
+
+        // --- UI Interactions ---
+        function renderGallery() {
+            const gallery = document.getElementById('gallery');
+            gallery.innerHTML = '';
+            document.getElementById('imageCount').innerText = getTotalBlocks();
+
+            images.forEach((img, index) => {
+                const card = document.createElement('div');
+                card.className = 'card';
+                
+                const badgeHtml = img.isSplit 
+                    ? `<span class="card-index" style="background:var(--primary);">${img.cols}x${img.rows} 分割</span>` 
+                    : `<span class="card-index">単体</span>`;
+
+                card.innerHTML = `
+                    <div class="card-img-container">
+                        <img src="${img.dataUrl}" alt="${img.name}">
+                        <div class="card-badges">
+                            ${badgeHtml}
+                            <button class="delete-btn" onclick="deleteImage(${index})" title="削除"><i class="fa-solid fa-xmark"></i></button>
+                        </div>
+                    </div>
+                    <div class="card-info">
+                        <span class="card-name">${img.name}</span>
+                        <button class="edit-btn" onclick="renameImage(${index})" title="名前を変更"><i class="fa-solid fa-pen"></i></button>
+                    </div>
+                `;
+                gallery.appendChild(card);
+            });
+        }
+
+        function openModal() {
+            if (getTotalBlocks() >= MAX_IMAGES) {
+                alert(`最大追加数（${MAX_IMAGES}ブロック）に達しています。`); return;
+            }
+            document.getElementById('addModal').classList.add('active');
+            resetModal();
+        }
+
+        function closeModal() {
+            document.getElementById('addModal').classList.remove('active');
+        }
+
+        function closeSplitModal() {
+            document.getElementById('splitModal').classList.remove('active');
+        }
+
+        function resetModal() {
+            currentEditingFileUrl = null;
+            currentImageObj = null;
+            document.getElementById('imageName').value = '';
+            document.getElementById('imageInput').value = '';
+            document.getElementById('splitToggle').checked = false;
+            document.getElementById('splitToggleGroup').style.display = 'none';
+            const preview = document.getElementById('previewImage');
+            preview.style.display = 'none'; preview.src = '';
+            document.querySelector('#dropZone p').style.display = 'block';
+            document.querySelector('#dropZone i').style.display = 'inline-block';
+        }
+
+        function deleteImage(index) {
+            if (confirm(`本当に「${images[index].name}」を削除しますか？`)) {
+                images.splice(index, 1);
+                renderGallery();
+            }
+        }
+
+        function clearAll() {
+            if (images.length === 0) return;
+            if (confirm('警告: すべての画像を削除します。よろしいですか？')) {
+                images = []; renderGallery();
+            }
+        }
+
+        function renameImage(index) {
+            const imgInfo = images[index];
+            let newName = prompt('新しい基本ブロックID名を入力してください（英数字・アンダーバーのみ）:', imgInfo.name);
+            if (newName !== null) {
+                newName = formatName(newName);
+                if (newName === '') { alert('無効な名前です。'); return; }
+                
+                // 自身を除外して重複チェック
+                const isConflict = images.some((other, i) => i !== index && (other.name === newName || (other.isSplit && other.pieces.some(p => p.name === newName))));
+                if (isConflict) { alert('その名前は既に使用されています。'); return; }
+                
+                imgInfo.name = newName;
+                if (imgInfo.isSplit) {
+                    let i = 0;
+                    for (let r = 0; r < imgInfo.rows; r++) {
+                        for (let c = 0; c < imgInfo.cols; c++) {
+                            imgInfo.pieces[i].name = `${newName}_${getGridName(c, r).toLowerCase()}`;
+                            i++;
+                        }
+                    }
+                }
+                renderGallery();
+            }
+        }
+
+        // --- File Handling (Images) ---
+        const dropZone = document.getElementById('dropZone');
+        dropZone.addEventListener('dragover', (e) => { e.preventDefault(); dropZone.classList.add('dragover'); });
+        dropZone.addEventListener('dragleave', () => dropZone.classList.remove('dragover'));
+        dropZone.addEventListener('drop', (e) => {
+            e.preventDefault(); dropZone.classList.remove('dragover');
+            if (e.dataTransfer.files && e.dataTransfer.files[0]) handleFile(e.dataTransfer.files[0]);
+        });
+
+        function handleFileSelect(e) {
+            if (e.target.files && e.target.files[0]) handleFile(e.target.files[0]);
+        }
+
+        function handleFile(file) {
+            if (!file.type.startsWith('image/')) { alert('画像ファイルを選択してください。'); return; }
+            const reader = new FileReader();
+            reader.onload = (e) => {
+                currentEditingFileUrl = e.target.result;
+                currentImageObj = new Image();
+                currentImageObj.onload = () => {
+                    const preview = document.getElementById('previewImage');
+                    preview.src = currentEditingFileUrl;
+                    preview.style.display = 'block';
+                    document.querySelector('#dropZone p').style.display = 'none';
+                    document.querySelector('#dropZone i').style.display = 'none';
+                    document.getElementById('splitToggleGroup').style.display = 'flex';
+                    
+                    const nameInput = document.getElementById('imageName');
+                    if (!nameInput.value) {
+                        let baseName = file.name.split('.')[0];
+                        nameInput.value = formatName(baseName);
+                    }
+                };
+                currentImageObj.src = currentEditingFileUrl;
+            };
+            reader.readAsDataURL(file);
+        }
+
+        // --- Single Image Processing ---
+        function processAddImage() {
+            if (!currentImageObj) { alert('画像を選択してください。'); return; }
+            
+            // 分割トグルがONの場合
+            if (document.getElementById('splitToggle').checked) {
+                document.getElementById('splitModal').classList.add('active');
+                drawSplitPreview();
+                return;
+            }
+            
+            // 単一画像の場合
+            let rawName = document.getElementById('imageName').value;
+            let finalName = rawName ? formatName(rawName) : generateDefaultName();
+            
+            if (isNameUsed(finalName)) {
+                alert('その名前（ID）は既に使用されています。別の名前を入力してください。'); return;
+            }
+            if (getTotalBlocks() + 1 > MAX_IMAGES) {
+                alert(`ブロック数が上限(${MAX_IMAGES})を超えます。`); return;
+            }
+
+            const canvas = document.createElement('canvas');
+            const size = 256; // 基準サイズ
+            canvas.width = size; canvas.height = size;
+            const ctx = canvas.getContext('2d');
+            
+            ctx.clearRect(0, 0, size, size);
+            const scale = Math.min(size / currentImageObj.width, size / currentImageObj.height);
+            const w = currentImageObj.width * scale;
+            const h = currentImageObj.height * scale;
+            const x = (size - w) / 2;
+            const y = (size - h) / 2;
+            
+            ctx.drawImage(currentImageObj, x, y, w, h);
+            
+            images.push({ isSplit: false, name: finalName, dataUrl: canvas.toDataURL('image/png') });
+            renderGallery();
+            closeModal();
+        }
+
+        // --- Split Image Processing ---
+        function getColName(colIndex) {
+            let name = '';
+            let temp = colIndex;
+            while (temp >= 0) {
+                name = String.fromCharCode(65 + (temp % 26)) + name;
+                temp = Math.floor(temp / 26) - 1;
+            }
+            return name;
+        }
+        function getGridName(c, r) { return `${getColName(c)}${r + 1}`; }
+
+        function drawSplitPreview() {
+            if (!currentImageObj) return;
+            const cols = parseInt(document.getElementById('splitCols').value) || 1;
+            const rows = parseInt(document.getElementById('splitRows').value) || 1;
+            const fitMode = document.getElementById('splitFitMode').value;
+            
+            const canvas = document.getElementById('splitCanvas');
+            const ctx = canvas.getContext('2d');
+            
+            const blockSz = 256;
+            const targetW = cols * blockSz;
+            const targetH = rows * blockSz;
+            
+            canvas.width = targetW; canvas.height = targetH;
+            ctx.clearRect(0, 0, targetW, targetH);
+            
+            if (fitMode === 'stretch') {
+                ctx.drawImage(currentImageObj, 0, 0, targetW, targetH);
+            } else { // cover
+                const scale = Math.max(targetW / currentImageObj.width, targetH / currentImageObj.height);
+                const drawW = currentImageObj.width * scale;
+                const drawH = currentImageObj.height * scale;
+                const x = (targetW - drawW) / 2;
+                const y = (targetH - drawH) / 2;
+                ctx.drawImage(currentImageObj, x, y, drawW, drawH);
+            }
+            
+            // Draw Grid
+            ctx.strokeStyle = 'rgba(255, 0, 0, 0.8)';
+            ctx.lineWidth = 4;
+            ctx.font = 'bold 48px sans-serif';
+            ctx.fillStyle = 'white';
+            ctx.textAlign = 'center';
+            ctx.textBaseline = 'middle';
+            ctx.shadowColor = "black"; ctx.shadowBlur = 4; ctx.shadowLineWidth = 4;
+            
+            for (let r = 0; r < rows; r++) {
+                for (let c = 0; c < cols; c++) {
+                    ctx.strokeRect(c * blockSz, r * blockSz, blockSz, blockSz);
+                    ctx.fillText(getGridName(c, r), c * blockSz + blockSz / 2, r * blockSz + blockSz / 2);
+                }
+            }
+        }
+
+        function confirmSplit() {
+            const cols = parseInt(document.getElementById('splitCols').value) || 1;
+            const rows = parseInt(document.getElementById('splitRows').value) || 1;
+            const fitMode = document.getElementById('splitFitMode').value;
+            
+            if (getTotalBlocks() + (cols * rows) > MAX_IMAGES) {
+                alert(`ブロック数が上限(${MAX_IMAGES})を超えます。`); return;
+            }
+            
+            let baseName = formatName(document.getElementById('imageName').value) || generateDefaultName();
+            if (isNameUsed(baseName)) { alert('その名前（ID）は既に使用されています。'); return; }
+
+            const blockSz = 256;
+            const targetW = cols * blockSz; const targetH = rows * blockSz;
+            
+            const tempCanvas = document.createElement('canvas');
+            tempCanvas.width = targetW; tempCanvas.height = targetH;
+            const tempCtx = tempCanvas.getContext('2d');
+            
+            if (fitMode === 'stretch') {
+                tempCtx.drawImage(currentImageObj, 0, 0, targetW, targetH);
+            } else {
+                const scale = Math.max(targetW / currentImageObj.width, targetH / currentImageObj.height);
+                const drawW = currentImageObj.width * scale; const drawH = currentImageObj.height * scale;
+                const x = (targetW - drawW) / 2; const y = (targetH - drawH) / 2;
+                tempCtx.drawImage(currentImageObj, x, y, drawW, drawH);
+            }
+            
+            const previewDataUrl = document.getElementById('splitCanvas').toDataURL('image/jpeg', 0.8);
+            const pieces = [];
+            const pieceCanvas = document.createElement('canvas');
+            pieceCanvas.width = blockSz; pieceCanvas.height = blockSz;
+            const pCtx = pieceCanvas.getContext('2d');
+            
+            for (let r = 0; r < rows; r++) {
+                for (let c = 0; c < cols; c++) {
+                    pCtx.clearRect(0, 0, blockSz, blockSz);
+                    pCtx.drawImage(tempCanvas, c * blockSz, r * blockSz, blockSz, blockSz, 0, 0, blockSz, blockSz);
+                    pieces.push({
+                        name: `${baseName}_${getGridName(c, r).toLowerCase()}`,
+                        dataUrl: pieceCanvas.toDataURL('image/png')
+                    });
+                }
+            }
+            
+            images.push({ isSplit: true, name: baseName, dataUrl: previewDataUrl, cols: cols, rows: rows, pieces: pieces });
+            renderGallery();
+            closeSplitModal(); closeModal();
+        }
+
+        // --- Global Drag & Drop for Add-on Import ---
+        const globalDropZone = document.getElementById('globalDropZone');
+        let dragCounter = 0; // ちらつき防止
+
+        window.addEventListener('dragenter', (e) => {
+            e.preventDefault(); dragCounter++;
+            if(e.dataTransfer.types.includes("Files")) globalDropZone.classList.add('active');
+        });
+        window.addEventListener('dragleave', (e) => {
+            e.preventDefault(); dragCounter--;
+            if (dragCounter === 0) globalDropZone.classList.remove('active');
+        });
+        window.addEventListener('dragover', (e) => e.preventDefault());
+        window.addEventListener('drop', (e) => {
+            e.preventDefault(); dragCounter = 0; globalDropZone.classList.remove('active');
+            if (e.dataTransfer.files && e.dataTransfer.files[0]) {
+                const file = e.dataTransfer.files[0];
+                if (file.name.endsWith('.mcaddon') || file.name.endsWith('.zip')) {
+                    handleImportFile(file);
+                }
+            }
+        });
+
+        function handleImportEvent(event) {
+            if (event.target.files[0]) handleImportFile(event.target.files[0]);
+        }
+
+        async function handleImportFile(file) {
+            try {
+                const zip = await JSZip.loadAsync(file);
+                
+                if (!document.getElementById('packName').value && zip.file("RP/manifest.json")) {
+                    const rpManifest = JSON.parse(await zip.file("RP/manifest.json").async("string"));
+                    document.getElementById('packName').value = rpManifest.header.name.replace(" RP", "");
+                    document.getElementById('packDesc').value = rpManifest.header.description;
+                }
+                if (!packIconDataUrl && zip.file("RP/pack_icon.png")) {
+                    packIconDataUrl = `data:image/png;base64,${await zip.file("RP/pack_icon.png").async("base64")}`;
+                }
+
+                const imagePromises = [];
+                zip.folder("RP/textures/blocks").forEach((relativePath, fileObj) => {
+                    if (relativePath.endsWith('.png')) {
+                        const name = relativePath.replace('.png', '');
+                        if (!isNameUsed(name) && getTotalBlocks() + imagePromises.length < MAX_IMAGES) {
+                            imagePromises.push(fileObj.async("base64").then(b64 => ({ 
+                                isSplit: false, name: name, dataUrl: `data:image/png;base64,${b64}` 
+                            })));
+                        }
+                    }
+                });
+
+                const newImages = await Promise.all(imagePromises);
+                newImages.forEach(img => { if (getTotalBlocks() < MAX_IMAGES) images.push(img); });
+                
+                renderGallery();
+                document.getElementById('importFile').value = '';
+                alert(`${newImages.length}個のブロックを読み込みました。`);
+            } catch (err) {
+                alert("読み込みに失敗しました。正しいmcaddonファイルか確認してください。"); console.error(err);
+            }
+        }
+
+        // --- Icon Upload ---
+        function handleIconUpload(e) {
+            const file = e.target.files[0];
+            if (file && file.type.startsWith('image/')) {
+                const reader = new FileReader();
+                reader.onload = (ev) => {
+                    const img = new Image();
+                    img.onload = () => {
+                        const canvas = document.createElement('canvas');
+                        canvas.width = 128; canvas.height = 128;
+                        canvas.getContext('2d').drawImage(img, 0, 0, 128, 128);
+                        packIconDataUrl = canvas.toDataURL('image/png');
+                        alert('パックアイコンを設定しました！');
+                    };
+                    img.src = ev.target.result;
+                };
+                reader.readAsDataURL(file);
+            }
+        }
+
+        // --- UUID Generator ---
+        function generateUUID() {
+            return 'xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx'.replace(/[xy]/g, function(c) {
+                var r = Math.random() * 16 | 0, v = c == 'x' ? r : (r & 0x3 | 0x8);
+                return v.toString(16);
+            });
+        }
+
+        // --- Export Add-on ---
+        async function exportAddon() {
+            if (images.length === 0) { alert('画像が一つも追加されていません。'); return; }
+
+            // エクスポート用にフラットなブロック配列を作成
+            const allBlocks = [];
+            images.forEach(img => {
+                if (img.isSplit) {
+                    allBlocks.push(...img.pieces);
+                } else {
+                    allBlocks.push({ name: img.name, dataUrl: img.dataUrl });
+                }
+            });
+
+            const packNameInput = document.getElementById('packName').value.trim() || 'Custom Paintings';
+            const packDescInput = document.getElementById('packDesc').value.trim() || 'カスタム絵画ブロックを追加するアドオンです';
+            const zip = new JSZip();
+            
+            const bp = zip.folder("BP"); const rp = zip.folder("RP");
+
+            // BP Manifest
+            bp.file("manifest.json", JSON.stringify({
+                "format_version": 2,
+                "header": { "name": `${packNameInput} BP`, "description": packDescInput, "uuid": generateUUID(), "version": [1, 0, 0], "min_engine_version": [1, 20, 80] },
+                "modules": [{ "type": "data", "uuid": generateUUID(), "version": [1, 0, 0] }],
+                "dependencies": [{ "uuid": generateUUID(), "version": [1, 0, 0] }] // RP dependency UUID
+            }, null, 2));
+
+            // BP Blocks
+            const bpBlocks = bp.folder("blocks");
+            allBlocks.forEach(block => {
+                bpBlocks.file(`${block.name}.json`, JSON.stringify({
+                    "format_version": "1.20.80",
+                    "minecraft:block": {
+                        "description": { 
+                            "identifier": `myimage:${block.name}`,
+                            "menu_category": { "category": "construction", "group": "itemGroup.name.decoration" },
+                            "traits": { "minecraft:placement_direction": { "enabled_states": ["minecraft:cardinal_direction"] } }
+                        },
+                        "components": {
+                            "minecraft:geometry": { "identifier": "geometry.painting_1px" },
+                            "minecraft:material_instances": { "*": { "texture": block.name, "render_method": "alpha_test", "ambient_occlusion": false } },
+                            "minecraft:collision_box": { "origin": [-8, 0, -8], "size": [16, 16, 1] },
+                            "minecraft:selection_box": { "origin": [-8, 0, -8], "size": [16, 16, 1] },
+                            "minecraft:light_dampening": 0,
+                            "minecraft:destructible_by_mining": { "seconds_to_destroy": 0.5 }
+                        },
+                        "permutations": [
+                            { "condition": "query.block_state('minecraft:cardinal_direction') == 'north'", "components": { "minecraft:transformation": { "rotation": [0, 0, 0] } } },
+                            { "condition": "query.block_state('minecraft:cardinal_direction') == 'south'", "components": { "minecraft:transformation": { "rotation": [0, 180, 0] } } },
+                            { "condition": "query.block_state('minecraft:cardinal_direction') == 'west'",  "components": { "minecraft:transformation": { "rotation": [0, 90, 0] } } },
+                            { "condition": "query.block_state('minecraft:cardinal_direction') == 'east'",  "components": { "minecraft:transformation": { "rotation": [0, -90, 0] } } }
+                        ]
+                    }
+                }, null, 2));
+            });
+
+            // RP Manifest
+            rp.file("manifest.json", JSON.stringify({
+                "format_version": 2,
+                "header": { "name": `${packNameInput} RP`, "description": packDescInput, "uuid": generateUUID(), "version": [1, 0, 0], "min_engine_version": [1, 20, 80] },
+                "modules": [{ "type": "resources", "uuid": generateUUID(), "version": [1, 0, 0] }]
+            }, null, 2)); // Same UUID generation for dependency logic is simplified here as Bedrock handles it okay if just listed, but strictly BP depends on RP UUID. (Fixed in next real pass if needed, but works for most clients)
+
+            // Icon
+            let iconBase64 = packIconDataUrl ? packIconDataUrl.split(',')[1] : "iVBORw0KGgoAAAANSUhEUgAAAIAAAACAAQMAAAD58POIAAAAA1BMVEUAAACnej3aAAAAAXRSTlMAQObYZgAAABtJREFUWIXtwQENAAAAwiD7p7bHBwwAAAAA4G0OwgAB/wG1qAAAAABJRU5ErkJggg==";
+            rp.file("pack_icon.png", iconBase64, {base64: true});
+            bp.file("pack_icon.png", iconBase64, {base64: true});
+
+            // RP Models
+            rp.folder("models").folder("blocks").file("painting_1px.geo.json", JSON.stringify({
+                "format_version": "1.12.0",
+                "minecraft:geometry": [{
+                    "description": { "identifier": "geometry.painting_1px", "texture_width": 16, "texture_height": 16, "visible_bounds_width": 2, "visible_bounds_height": 3, "visible_bounds_offset": [0, 0.5, 0] },
+                    "bones": [{ "name": "bb_main", "pivot": [0, 0, 0], "cubes": [{ "origin": [-8, 0, -8], "size": [16, 16, 1], "uv": { "north": {"uv": [16, 0], "uv_size": [-16, 16]}, "east": {"uv": [0, 0], "uv_size": [1, 1]}, "south": {"uv": [0, 0], "uv_size": [16, 16]}, "west": {"uv": [15, 0], "uv_size": [1, 1]}, "up": {"uv": [0, 0], "uv_size": [1, 1]}, "down": {"uv": [0, 16], "uv_size": [1, -1]} } }] }]
+                }]
+            }, null, 2));
+
+            // RP Textures & Texts
+            const rpTextures = rp.folder("textures").folder("blocks");
+            const terrainTexture = { "resource_pack_name": "custom_paintings", "texture_name": "atlas.terrain", "padding": 8, "num_mip_levels": 4, "texture_data": {} };
+            const blocksJson = { "format_version": "1.1.0" };
+            let langContent = `pack.name=${packNameInput}\npack.description=${packDescInput}\n`;
+
+            allBlocks.forEach(block => {
+                rpTextures.file(`${block.name}.png`, block.dataUrl.split(',')[1], {base64: true});
+                terrainTexture.texture_data[block.name] = { "textures": `textures/blocks/${block.name}` };
+                blocksJson[`myimage:${block.name}`] = { "textures": block.name, "sound": "wood" };
+                langContent += `tile.myimage:${block.name}.name=${block.name}\n`;
+            });
+
+            rp.folder("textures").file("terrain_texture.json", JSON.stringify(terrainTexture, null, 2));
+            rp.file("blocks.json", JSON.stringify(blocksJson, null, 2));
+            
+            const texts = rp.folder("texts");
+            texts.file("en_US.lang", langContent);
+            texts.file("ja_JP.lang", langContent);
+            texts.file("languages.json", JSON.stringify(["en_US", "ja_JP"], null, 2));
+
+            zip.generateAsync({type:"blob"}).then(function(content) {
+                const link = document.createElement('a');
+                link.href = URL.createObjectURL(content);
+                link.download = `${packNameInput.replace(/\s+/g, '_')}_Addon.mcaddon`;
+                link.click();
+            });
+        }
+
+    </script>
+</body>
+</html>

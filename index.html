@@ -1,0 +1,696 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>マイクラ 絵画ブロック アドオンジェネレーター</title>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/jszip/3.10.1/jszip.min.js"></script>
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+    <style>
+        :root {
+            --bg-color: #1e1e2e;
+            --panel-bg: #282a36;
+            --card-bg: #383a59;
+            --text-main: #f8f8f2;
+            --text-sub: #bd93f9;
+            --primary: #bd93f9;
+            --primary-hover: #ff79c6;
+            --danger: #ff5555;
+            --danger-hover: #ff0000;
+            --border-radius: 12px;
+            --transition: all 0.2s ease;
+        }
+
+        * { box-sizing: border-box; margin: 0; padding: 0; font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; }
+        
+        body { background-color: var(--bg-color); color: var(--text-main); line-height: 1.6; }
+
+        /* Header */
+        header {
+            display: flex; justify-content: space-between; align-items: center;
+            padding: 1rem 2rem; background-color: var(--panel-bg);
+            box-shadow: 0 4px 6px rgba(0,0,0,0.3); position: sticky; top: 0; z-index: 100;
+        }
+        .header-title { font-size: 1.5rem; font-weight: bold; color: var(--primary); }
+        .header-controls { display: flex; gap: 10px; }
+        
+        button {
+            background-color: var(--primary); color: white; border: none;
+            padding: 8px 16px; border-radius: 8px; cursor: pointer;
+            font-size: 1rem; font-weight: bold; transition: var(--transition);
+            display: flex; align-items: center; gap: 8px;
+        }
+        button:hover { background-color: var(--primary-hover); transform: translateY(-2px); }
+        button:disabled { background-color: #555; cursor: not-allowed; transform: none; }
+        .btn-danger { background-color: var(--danger); }
+        .btn-danger:hover { background-color: var(--danger-hover); }
+
+        /* Settings Section */
+        .settings-container {
+            padding: 2rem; max-width: 1200px; margin: 0 auto;
+            display: grid; grid-template-columns: repeat(auto-fit, minmax(300px, 1fr)); gap: 1.5rem;
+        }
+        .input-group { display: flex; flex-direction: column; gap: 5px; }
+        .input-group label { font-size: 0.9rem; color: var(--text-sub); }
+        input[type="text"] {
+            padding: 10px; border-radius: 6px; border: 1px solid #444;
+            background-color: var(--bg-color); color: white; outline: none; transition: var(--transition);
+        }
+        input[type="text"]:focus { border-color: var(--primary); box-shadow: 0 0 0 2px rgba(189, 147, 249, 0.3); }
+
+        /* Status Bar */
+        .status-bar { text-align: center; padding: 0 2rem; margin-bottom: 1rem; color: var(--text-sub); }
+
+        /* Gallery Section */
+        .gallery {
+            padding: 0 2rem 2rem 2rem; max-width: 1200px; margin: 0 auto;
+            display: grid; grid-template-columns: repeat(auto-fill, minmax(220px, 1fr)); gap: 1.5rem;
+        }
+
+        /* Card */
+        .card {
+            background-color: var(--card-bg); border-radius: var(--border-radius);
+            overflow: hidden; position: relative; box-shadow: 0 4px 10px rgba(0,0,0,0.2);
+            transition: var(--transition); animation: fadeIn 0.3s ease;
+        }
+        .card:hover { transform: translateY(-5px); box-shadow: 0 8px 15px rgba(0,0,0,0.4); }
+        .card-img-container {
+            width: 100%; aspect-ratio: 1 / 1; background-color: rgba(0,0,0,0.5);
+            background-image: linear-gradient(45deg, #444 25%, transparent 25%), linear-gradient(-45deg, #444 25%, transparent 25%), linear-gradient(45deg, transparent 75%, #444 75%), linear-gradient(-45deg, transparent 75%, #444 75%);
+            background-size: 20px 20px; background-position: 0 0, 0 10px, 10px -10px, -10px 0px;
+            display: flex; align-items: center; justify-content: center; position: relative;
+        }
+        .card img { max-width: 100%; max-height: 100%; object-fit: contain; image-rendering: pixelated; }
+        .card-info { padding: 12px; display: flex; justify-content: space-between; align-items: center; }
+        .card-name { font-weight: bold; font-size: 1.1rem; word-break: break-all; margin-right: 10px;}
+        .edit-btn { background: none; color: var(--text-sub); padding: 5px; width: 30px; border-radius: 4px; }
+        .edit-btn:hover { background-color: rgba(255,255,255,0.1); color: var(--primary); }
+        
+        .card-badges { position: absolute; top: 10px; right: 10px; display: flex; gap: 5px; flex-direction: column; align-items: flex-end;}
+        .card-index {
+            background-color: rgba(0,0,0,0.7); color: white; padding: 2px 8px;
+            border-radius: 12px; font-size: 0.8rem; font-weight: bold;
+        }
+        .delete-btn {
+            background-color: var(--danger); color: white; width: 28px; height: 28px;
+            border-radius: 50%; display: flex; align-items: center; justify-content: center;
+            cursor: pointer; transition: var(--transition); border: none; padding: 0;
+        }
+        .delete-btn:hover { background-color: var(--danger-hover); transform: scale(1.1); }
+
+        /* Modal */
+        .modal-overlay {
+            position: fixed; top: 0; left: 0; width: 100%; height: 100%;
+            background: rgba(0,0,0,0.6); backdrop-filter: blur(3px);
+            display: none; align-items: center; justify-content: center; z-index: 1000;
+        }
+        .modal-overlay.active { display: flex; }
+        .modal-content {
+            background-color: var(--panel-bg); padding: 2rem; border-radius: var(--border-radius);
+            width: 90%; max-width: 500px; box-shadow: 0 10px 30px rgba(0,0,0,0.5);
+        }
+        .modal-header { display: flex; justify-content: space-between; align-items: center; margin-bottom: 1.5rem; }
+        .modal-header h2 { font-size: 1.2rem; }
+        .close-modal { background: none; color: white; font-size: 1.5rem; cursor: pointer; padding: 0; margin: 0; }
+        .close-modal:hover { color: var(--danger); background: none; transform: none;}
+
+        .drop-zone {
+            border: 2px dashed var(--primary); border-radius: var(--border-radius); padding: 3rem 1rem;
+            text-align: center; color: var(--text-sub); cursor: pointer; transition: var(--transition);
+            margin-bottom: 1.5rem; background-color: rgba(189, 147, 249, 0.05);
+        }
+        .drop-zone.dragover { background-color: rgba(189, 147, 249, 0.2); border-color: var(--primary-hover); color: white; }
+        
+        .modal-actions { display: flex; justify-content: flex-end; gap: 10px; margin-top: 1.5rem; }
+
+        @keyframes fadeIn { from { opacity: 0; transform: scale(0.9); } to { opacity: 1; transform: scale(1); } }
+        
+        /* Hidden inputs */
+        input[type="file"] { display: none; }
+
+        /* Responsive */
+        @media (max-width: 600px) {
+            header { flex-direction: column; gap: 15px; }
+            .header-controls { flex-wrap: wrap; justify-content: center; }
+            .gallery { grid-template-columns: repeat(auto-fill, minmax(150px, 1fr)); }
+        }
+    </style>
+</head>
+<body>
+
+    <header>
+        <div class="header-title"><i class="fa-solid fa-cube"></i> Custom Painting Add-on</div>
+        <div class="header-controls">
+            <button onclick="document.getElementById('importFile').click()"><i class="fa-solid fa-file-import"></i> 読み込み</button>
+            <input type="file" id="importFile" accept=".mcaddon" onchange="handleImport(event)">
+            
+            <button class="btn-danger" onclick="clearAll()"><i class="fa-solid fa-trash"></i> クリア</button>
+            <button onclick="openModal()"><i class="fa-solid fa-plus"></i> 追加</button>
+            <button style="background-color: #50fa7b; color: #282a36;" onclick="exportAddon()"><i class="fa-solid fa-download"></i> エクスポート</button>
+        </div>
+    </header>
+
+    <div class="settings-container">
+        <div class="input-group">
+            <label>パック名</label>
+            <input type="text" id="packName" placeholder="My Custom Paintings">
+        </div>
+        <div class="input-group">
+            <label>説明</label>
+            <input type="text" id="packDesc" placeholder="カスタム絵画ブロックを追加するアドオンです">
+        </div>
+        <div class="input-group">
+            <label>パックアイコン (正方形画像を選択)</label>
+            <button onclick="document.getElementById('packIconInput').click()" style="width: 100%; justify-content: center; background-color: var(--card-bg);">
+                <i class="fa-solid fa-image"></i> アイコンを変更
+            </button>
+            <input type="file" id="packIconInput" accept="image/*" onchange="handleIconUpload(event)">
+        </div>
+    </div>
+
+    <div class="status-bar">
+        現在のブロック数: <span id="imageCount" style="color: var(--primary); font-weight: bold;">0</span> / 150
+    </div>
+
+    <main class="gallery" id="gallery"></main>
+
+    <div class="modal-overlay" id="addModal">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h2>新しいブロックを追加</h2>
+                <button class="close-modal" onclick="closeModal()"><i class="fa-solid fa-xmark"></i></button>
+            </div>
+            
+            <div class="drop-zone" id="dropZone" onclick="document.getElementById('imageInput').click()">
+                <i class="fa-solid fa-cloud-arrow-up" style="font-size: 3rem; margin-bottom: 10px;"></i>
+                <p>クリックまたはドラッグ＆ドロップで画像を選択<br><small>(正方形に自動リサイズされます)</small></p>
+                <img id="previewImage" style="display: none; max-width: 100px; max-height: 100px; margin: 10px auto; border-radius: 8px;">
+            </div>
+            <input type="file" id="imageInput" accept="image/*" onchange="handleFileSelect(event)">
+
+            <div class="input-group">
+                <label>ブロックID名 (任意)</label>
+                <input type="text" id="imageName" placeholder="空白の場合は自動生成されます">
+                <small style="color: #888; margin-top: 5px;">※ローマ字、数字、アンダーバーのみ。空白は_に変換されます。</small>
+            </div>
+
+            <div class="modal-actions">
+                <button onclick="closeModal()" style="background-color: transparent; border: 1px solid var(--text-sub);">キャンセル</button>
+                <button onclick="processAddImage()">追加する</button>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        // State
+        const MAX_IMAGES = 150;
+        let images = []; 
+        let packIconDataUrl = null;
+        let currentEditingFile = null;
+
+        // --- UI Interactions ---
+
+        function renderGallery() {
+            const gallery = document.getElementById('gallery');
+            gallery.innerHTML = '';
+            
+            document.getElementById('imageCount').innerText = images.length;
+
+            images.forEach((img, index) => {
+                const card = document.createElement('div');
+                card.className = 'card';
+                card.innerHTML = `
+                    <div class="card-img-container">
+                        <img src="${img.dataUrl}" alt="${img.name}">
+                        <div class="card-badges">
+                            <span class="card-index">${index + 1}</span>
+                            <button class="delete-btn" onclick="deleteImage(${index})" title="削除"><i class="fa-solid fa-xmark"></i></button>
+                        </div>
+                    </div>
+                    <div class="card-info">
+                        <span class="card-name">${img.name}</span>
+                        <button class="edit-btn" onclick="renameImage(${index})" title="名前を変更"><i class="fa-solid fa-pen"></i></button>
+                    </div>
+                `;
+                gallery.appendChild(card);
+            });
+        }
+
+        function openModal() {
+            if (images.length >= MAX_IMAGES) {
+                alert(`最大追加数（${MAX_IMAGES}枚）に達しています。`);
+                return;
+            }
+            document.getElementById('addModal').classList.add('active');
+            resetModal();
+        }
+
+        function closeModal() {
+            document.getElementById('addModal').classList.remove('active');
+            resetModal();
+        }
+
+        function resetModal() {
+            currentEditingFile = null;
+            document.getElementById('imageName').value = '';
+            document.getElementById('imageInput').value = '';
+            const preview = document.getElementById('previewImage');
+            preview.style.display = 'none';
+            preview.src = '';
+            document.querySelector('#dropZone p').style.display = 'block';
+            document.querySelector('#dropZone i').style.display = 'inline-block';
+        }
+
+        function formatName(rawName) {
+            // Convert spaces to _, remove invalid chars, convert to lowercase
+            let cleaned = rawName.replace(/\s+/g, '_').replace(/[^a-zA-Z0-9_]/g, '').toLowerCase();
+            return cleaned;
+        }
+
+        function generateDefaultName() {
+            let num = 1;
+            let name = `image${num}`;
+            while (images.some(img => img.name === name)) {
+                num++;
+                name = `image${num}`;
+            }
+            return name;
+        }
+
+        function deleteImage(index) {
+            if (confirm(`本当に「${images[index].name}」を削除しますか？`)) {
+                images.splice(index, 1);
+                renderGallery();
+            }
+        }
+
+        function clearAll() {
+            if (images.length === 0) return;
+            if (confirm('警告: すべての画像を削除します。よろしいですか？')) {
+                images = [];
+                renderGallery();
+            }
+        }
+
+        function renameImage(index) {
+            const currentName = images[index].name;
+            let newName = prompt('新しいブロックID名を入力してください（ローマ字、数字、アンダーバーのみ）:', currentName);
+            if (newName !== null) {
+                newName = formatName(newName);
+                if (newName === '') {
+                    alert('無効な名前です。');
+                    return;
+                }
+                if (newName !== currentName && images.some(img => img.name === newName)) {
+                    alert('その名前は既に使用されています。');
+                    return;
+                }
+                images[index].name = newName;
+                renderGallery();
+            }
+        }
+
+        // --- File Handling & Canvas ---
+
+        const dropZone = document.getElementById('dropZone');
+
+        dropZone.addEventListener('dragover', (e) => {
+            e.preventDefault(); dropZone.classList.add('dragover');
+        });
+        dropZone.addEventListener('dragleave', () => dropZone.classList.remove('dragover'));
+        dropZone.addEventListener('drop', (e) => {
+            e.preventDefault(); dropZone.classList.remove('dragover');
+            if (e.dataTransfer.files && e.dataTransfer.files[0]) {
+                handleFile(e.dataTransfer.files[0]);
+            }
+        });
+
+        function handleFileSelect(e) {
+            if (e.target.files && e.target.files[0]) {
+                handleFile(e.target.files[0]);
+            }
+        }
+
+        function handleFile(file) {
+            if (!file.type.startsWith('image/')) {
+                alert('画像ファイルを選択してください。'); return;
+            }
+            const reader = new FileReader();
+            reader.onload = (e) => {
+                currentEditingFile = e.target.result;
+                const preview = document.getElementById('previewImage');
+                preview.src = currentEditingFile;
+                preview.style.display = 'block';
+                document.querySelector('#dropZone p').style.display = 'none';
+                document.querySelector('#dropZone i').style.display = 'none';
+                
+                // Set default name based on file name if input is empty
+                const nameInput = document.getElementById('imageName');
+                if (!nameInput.value) {
+                    let baseName = file.name.split('.')[0];
+                    nameInput.value = formatName(baseName);
+                }
+            };
+            reader.readAsDataURL(file);
+        }
+
+        function processAddImage() {
+            if (!currentEditingFile) {
+                alert('画像を選択してください。'); return;
+            }
+            
+            let rawName = document.getElementById('imageName').value;
+            let finalName = rawName ? formatName(rawName) : '';
+            
+            if (!finalName) finalName = generateDefaultName();
+            
+            if (images.some(img => img.name === finalName)) {
+                alert('その名前（ID）は既に使用されています。別の名前を入力してください。');
+                return;
+            }
+
+            // Draw to canvas to ensure 1:1 aspect ratio and standard sizing (let's use max 256x256 for performance)
+            const img = new Image();
+            img.onload = () => {
+                const canvas = document.createElement('canvas');
+                const size = Math.min(Math.max(img.width, img.height), 256); // Force square, max 256
+                canvas.width = size; canvas.height = size;
+                const ctx = canvas.getContext('2d');
+                
+                // Clear background for transparency
+                ctx.clearRect(0, 0, size, size);
+                
+                // Calculate centering
+                const scale = Math.min(size / img.width, size / img.height);
+                const w = img.width * scale;
+                const h = img.height * scale;
+                const x = (size - w) / 2;
+                const y = (size - h) / 2;
+                
+                ctx.drawImage(img, x, y, w, h);
+                const dataUrl = canvas.toDataURL('image/png');
+                
+                images.push({ name: finalName, dataUrl: dataUrl });
+                renderGallery();
+                closeModal();
+            };
+            img.src = currentEditingFile;
+        }
+
+        function handleIconUpload(e) {
+            const file = e.target.files[0];
+            if (file && file.type.startsWith('image/')) {
+                const reader = new FileReader();
+                reader.onload = (ev) => {
+                    const img = new Image();
+                    img.onload = () => {
+                        const canvas = document.createElement('canvas');
+                        canvas.width = 128; canvas.height = 128; // Pack icon must be square
+                        const ctx = canvas.getContext('2d');
+                        ctx.drawImage(img, 0, 0, 128, 128);
+                        packIconDataUrl = canvas.toDataURL('image/png');
+                        alert('パックアイコンを設定しました！');
+                    };
+                    img.src = ev.target.result;
+                };
+                reader.readAsDataURL(file);
+            }
+        }
+
+        // --- UUID Generator ---
+        function generateUUID() {
+            return 'xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx'.replace(/[xy]/g, function(c) {
+                var r = Math.random() * 16 | 0, v = c == 'x' ? r : (r & 0x3 | 0x8);
+                return v.toString(16);
+            });
+        }
+
+        // --- Add-on Generation (JSZip) ---
+
+        async function exportAddon() {
+            if (images.length === 0) {
+                alert('画像が一つも追加されていません。'); return;
+            }
+
+            const packNameInput = document.getElementById('packName').value.trim() || 'Custom Paintings';
+            const packDescInput = document.getElementById('packDesc').value.trim() || 'カスタム絵画ブロックを追加するアドオンです';
+            
+            const zip = new JSZip();
+            
+            const bpUUID1 = generateUUID(); const bpUUID2 = generateUUID();
+            const rpUUID1 = generateUUID(); const rpUUID2 = generateUUID();
+
+            const bp = zip.folder("BP");
+            const rp = zip.folder("RP");
+
+            // --- Behavior Pack (BP) ---
+            const bpManifest = {
+                "format_version": 2,
+                "header": { "name": `${packNameInput} BP`, "description": packDescInput, "uuid": bpUUID1, "version": [1, 0, 0], "min_engine_version": [1, 20, 80] },
+                "modules": [{ "type": "data", "uuid": bpUUID2, "version": [1, 0, 0] }],
+                "dependencies": [{ "uuid": rpUUID1, "version": [1, 0, 0] }]
+            };
+            bp.file("manifest.json", JSON.stringify(bpManifest, null, 2));
+
+            // BP Blocks
+            const bpBlocks = bp.folder("blocks");
+            images.forEach(img => {
+                const blockJson = {
+                    "format_version": "1.20.80",
+                    "minecraft:block": {
+                        "description": { 
+                            "identifier": `myimage:${img.name}`,
+                            // ★ 追加: クリエイティブインベントリの設定 ★
+                            "menu_category": {
+                                "category": "construction",
+                                "group": "itemGroup.name.decoration"
+                            },
+                            // ★ 追加: 設置方向のTrait ★
+                            "traits": {
+                                "minecraft:placement_direction": {
+                                    "enabled_states": [
+                                        "minecraft:cardinal_direction"
+                                    ]
+                                }
+                            }
+                        },
+                        "components": {
+                            "minecraft:geometry": { "identifier": "geometry.painting_1px" },
+                            "minecraft:material_instances": {
+                                "*": { "texture": img.name, "render_method": "alpha_test", "ambient_occlusion": false }
+                            },
+                            // Set physical bounds to 1px thin on Z axis (adjust origin and size to fit standard block width/height but 1px depth)
+                            "minecraft:collision_box": { "origin": [-8, -8, -8], "size": [16, 16, 1] },
+                            "minecraft:selection_box": { "origin": [-8, -8, -8], "size": [16, 16, 1] },
+                            "minecraft:light_dampening": 0,
+                            "minecraft:destructible_by_mining": { "seconds_to_destroy": 0.5 }
+                        },
+                        // ★ 追加: 向きによる回転 (Permutations) ★
+                        "permutations": [
+                            {
+                                "condition": "query.block_state('minecraft:cardinal_direction') == 'north'",
+                                "components": {
+                                    "minecraft:transformation": {
+                                        "rotation": [0, 0, 0]
+                                    }
+                                }
+                            },
+                            {
+                                "condition": "query.block_state('minecraft:cardinal_direction') == 'south'",
+                                "components": {
+                                    "minecraft:transformation": {
+                                        "rotation": [0, 180, 0]
+                                    }
+                                }
+                            },
+                            {
+                                "condition": "query.block_state('minecraft:cardinal_direction') == 'west'",
+                                "components": {
+                                    "minecraft:transformation": {
+                                        "rotation": [0, 90, 0]
+                                    }
+                                }
+                            },
+                            {
+                                "condition": "query.block_state('minecraft:cardinal_direction') == 'east'",
+                                "components": {
+                                    "minecraft:transformation": {
+                                        "rotation": [0, -90, 0]
+                                    }
+                                }
+                            }
+                        ]
+                    }
+                };
+                bpBlocks.file(`${img.name}.json`, JSON.stringify(blockJson, null, 2));
+            });
+
+
+            // --- Resource Pack (RP) ---
+            const rpManifest = {
+                "format_version": 2,
+                "header": { "name": `${packNameInput} RP`, "description": packDescInput, "uuid": rpUUID1, "version": [1, 0, 0], "min_engine_version": [1, 20, 80] },
+                "modules": [{ "type": "resources", "uuid": rpUUID2, "version": [1, 0, 0] }]
+            };
+            rp.file("manifest.json", JSON.stringify(rpManifest, null, 2));
+
+            // Default or Custom Pack Icon
+            let iconBase64 = packIconDataUrl ? packIconDataUrl.split(',')[1] : "iVBORw0KGgoAAAANSUhEUgAAAIAAAACAAQMAAAD58POIAAAAA1BMVEUAAACnej3aAAAAAXRSTlMAQObYZgAAABtJREFUWIXtwQENAAAAwiD7p7bHBwwAAAAA4G0OwgAB/wG1qAAAAABJRU5ErkJggg=="; // Transparent fallback
+            rp.file("pack_icon.png", iconBase64, {base64: true});
+            bp.file("pack_icon.png", iconBase64, {base64: true});
+
+            // RP Models (Custom Geometry for 1px thickness)
+            const rpModels = rp.folder("models").folder("blocks");
+            const geometryJson = {
+                "format_version": "1.12.0",
+                "minecraft:geometry": [
+                    {
+                        "description": {
+				"identifier": "geometry.painting_1px",
+				"texture_width": 16,
+				"texture_height": 16,
+				"visible_bounds_width": 2,
+				"visible_bounds_height": 3,
+				"visible_bounds_offset": [0, 0.5, 0]
+			},
+			"bones": [
+				{
+					"name": "bb_main",
+					"pivot": [0, 0, 0],
+					"cubes": [
+						{
+							"origin": [-8, 0, -7],
+							"size": [16, 16, 1],
+							"uv": {
+								"north": {"uv": [16, 0], "uv_size": [-16, 16]},
+								"east": {"uv": [0, 0], "uv_size": [1, 1]},
+								"south": {"uv": [0, 0], "uv_size": [16, 16]},
+								"west": {"uv": [15, 0], "uv_size": [1, 1]},
+								"up": {"uv": [0, 0], "uv_size": [1, 1]},
+								"down": {"uv": [0, 16], "uv_size": [1, -1]}
+							}
+						}
+					   ]
+				      }
+			         ]
+                    }
+                ]
+            };
+            rpModels.file("painting_1px.geo.json", JSON.stringify(geometryJson, null, 2));
+
+            // RP Textures & Configuration
+            const rpTextures = rp.folder("textures").folder("blocks");
+            const terrainTexture = {
+                "resource_pack_name": "custom_paintings",
+                "texture_name": "atlas.terrain",
+                "padding": 8,
+                "num_mip_levels": 4,
+                "texture_data": {}
+            };
+            
+            const blocksJson = { "format_version": "1.1.0" };
+            let langContent = "";
+
+            images.forEach(img => {
+                // Save PNG
+                const base64Data = img.dataUrl.split(',')[1];
+                rpTextures.file(`${img.name}.png`, base64Data, {base64: true});
+
+                // Add to terrain_texture.json
+                terrainTexture.texture_data[img.name] = { "textures": `textures/blocks/${img.name}` };
+                
+                // Add to blocks.json (for RP)
+                blocksJson[`myimage:${img.name}`] = { "textures": img.name, "sound": "wood" };
+
+                // Add to Language file
+                langContent += `tile.myimage:${img.name}.name=${img.name}\n`;
+            });
+
+            rp.folder("textures").file("terrain_texture.json", JSON.stringify(terrainTexture, null, 2));
+            rp.file("blocks.json", JSON.stringify(blocksJson, null, 2));
+            
+            const texts = rp.folder("texts");
+            texts.file("en_US.lang", langContent);
+            texts.file("ja_JP.lang", langContent);
+            texts.file("languages.json", JSON.stringify(["en_US", "ja_JP"], null, 2));
+
+            // --- Generate and Download ---
+            zip.generateAsync({type:"blob"}).then(function(content) {
+                const link = document.createElement('a');
+                link.href = URL.createObjectURL(content);
+                link.download = `${packNameInput.replace(/\s+/g, '_')}_Addon.mcaddon`;
+                link.click();
+            });
+        }
+
+        // --- Import Add-on ---
+        
+        async function handleImport(event) {
+            const file = event.target.files[0];
+            if (!file) return;
+
+            try {
+                const zip = await JSZip.loadAsync(file);
+                
+                // Read manifests only if current settings are empty
+                const currentName = document.getElementById('packName').value;
+                if (!currentName && zip.file("RP/manifest.json")) {
+                    const rpManifestRaw = await zip.file("RP/manifest.json").async("string");
+                    const rpManifest = JSON.parse(rpManifestRaw);
+                    let importedName = rpManifest.header.name.replace(" RP", "");
+                    document.getElementById('packName').value = importedName;
+                    document.getElementById('packDesc').value = rpManifest.header.description;
+                }
+
+                if (!packIconDataUrl && zip.file("RP/pack_icon.png")) {
+                    const icon64 = await zip.file("RP/pack_icon.png").async("base64");
+                    packIconDataUrl = `data:image/png;base64,${icon64}`;
+                }
+
+                // Read Images from RP/textures/blocks
+                const imagePromises = [];
+                zip.folder("RP/textures/blocks").forEach((relativePath, file) => {
+                    if (relativePath.endsWith('.png')) {
+                        const name = relativePath.replace('.png', '');
+                        
+                        // Avoid duplicates if continuing editing
+                        if (!images.some(img => img.name === name) && images.length + imagePromises.length < MAX_IMAGES) {
+                            const promise = file.async("base64").then(base64 => {
+                                return {
+                                    name: name,
+                                    dataUrl: `data:image/png;base64,${base64}`
+                                };
+                            });
+                            imagePromises.push(promise);
+                        }
+                    }
+                });
+
+                // Wait for all images to be extracted and converted to base64
+                const newImages = await Promise.all(imagePromises);
+                
+                // Add to state
+                newImages.forEach(img => {
+                    if (images.length < MAX_IMAGES) {
+                        images.push(img);
+                    }
+                });
+
+                // Re-render gallery once after all images are loaded
+                renderGallery();
+
+                // Clear file input
+                event.target.value = '';
+
+            } catch (err) {
+                alert("ファイルの読み込みに失敗しました。このアプリで生成されたmcaddonファイルを選択してください。");
+                console.error(err);
+            }
+        }
+
+        // Initial render
+        renderGallery();
+
+    </script>
+</body>
+</html>

@@ -1,0 +1,918 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>マイクラ 絵画ブロック アドオンジェネレーター (Auto-Place版)</title>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/jszip/3.10.1/jszip.min.js"></script>
+    <style>
+        :root { --primary: #3b82f6; --bg: #f3f4f6; --card: #ffffff; --text: #1f2937; }
+        body { font-family: 'Segoe UI', sans-serif; background: var(--bg); color: var(--text); margin: 0; padding: 20px; display: flex; flex-direction: column; align-items: center; min-height: 100vh; }
+        h1 { margin-bottom: 10px; color: #111827; }
+        .container { width: 100%; max-width: 800px; display: flex; flex-direction: column; gap: 20px; }
+        
+        /* Input Area */
+        .card { background: var(--card); padding: 20px; border-radius: 12px; box-shadow: 0 4px 6px -1px rgba(0,0,0,0.1); }
+        .row { display: flex; gap: 10px; align-items: center; flex-wrap: wrap; }
+        input[type="text"], input[type="number"], select { padding: 8px 12px; border: 1px solid #d1d5db; border-radius: 6px; flex: 1; }
+        button { background: var(--primary); color: white; border: none; padding: 10px 20px; border-radius: 6px; cursor: pointer; font-weight: bold; transition: 0.2s; }
+        button:hover { opacity: 0.9; }
+        button.secondary { background: #6b7280; }
+        button.accent { background: #8b5cf6; }
+
+        /* Drop Zone */
+        /* Z-Index fix: Ensure drop zones are ABOVE the global overlay (2000) */
+        .drop-zone { border: 2px dashed #d1d5db; border-radius: 12px; padding: 30px; text-align: center; cursor: pointer; transition: 0.2s; background: #f9fafb; position: relative; z-index: 2010; }
+        .drop-zone:hover, .drop-zone.dragover { border-color: var(--primary); background: #eff6ff; }
+        .drop-zone p { margin: 0; color: #6b7280; pointer-events: none; }
+        #fileInput { display: none; }
+        #previewImage { max-width: 100%; max-height: 300px; margin-top: 15px; border-radius: 8px; display: none; box-shadow: 0 2px 4px rgba(0,0,0,0.1); }
+
+        /* Gallery */
+        .gallery { display: grid; grid-template-columns: repeat(auto-fill, minmax(100px, 1fr)); gap: 10px; margin-top: 10px; }
+        .gallery-item { position: relative; aspect-ratio: 1; background: #e5e7eb; border-radius: 8px; overflow: hidden; cursor: pointer; border: 2px solid transparent; }
+        .gallery-item:hover { border-color: var(--primary); }
+        .gallery-item img { width: 100%; height: 100%; object-fit: contain; }
+        .gallery-item .badge { position: absolute; bottom: 0; right: 0; background: rgba(0,0,0,0.6); color: white; font-size: 10px; padding: 2px 6px; border-top-left-radius: 4px; }
+        .gallery-item .del-btn { position: absolute; top: 2px; right: 2px; background: red; color: white; border-radius: 50%; width: 20px; height: 20px; text-align: center; line-height: 20px; font-size: 12px; display: none; }
+        .gallery-item:hover .del-btn { display: block; }
+
+        /* Modals */
+        /* Z-Index fix: Modal must be higher than everything (drop zones are 2010, overlay is 2000) */
+        .modal-overlay { position: fixed; top: 0; left: 0; width: 100%; height: 100%; background: rgba(0,0,0,0.5); display: none; justify-content: center; align-items: center; z-index: 3000; }
+        .modal-overlay.active { display: flex; }
+        .modal { background: white; padding: 20px; border-radius: 12px; max-width: 90%; max-height: 90vh; overflow-y: auto; width: 400px; }
+        .split-grid { display: grid; gap: 10px; margin-top: 15px; }
+
+        /* Icon Upload */
+        /* Z-Index fix applied here as well */
+        .icon-upload { width: 64px; height: 64px; border: 2px dashed #ccc; border-radius: 8px; display: flex; align-items: center; justify-content: center; cursor: pointer; overflow: hidden; position: relative; z-index: 2010; background: white; }
+        .icon-upload img { width: 100%; height: 100%; object-fit: cover; }
+        
+        /* Toggle Switch */
+        .toggle-switch { display: flex; align-items: center; gap: 8px; font-size: 14px; user-select: none; }
+        .toggle-input { display: none; }
+        .toggle-label { width: 40px; height: 20px; background: #ccc; border-radius: 20px; position: relative; cursor: pointer; transition: 0.3s; }
+        .toggle-label::after { content: ''; position: absolute; top: 2px; left: 2px; width: 16px; height: 16px; background: white; border-radius: 50%; transition: 0.3s; }
+        .toggle-input:checked + .toggle-label { background: var(--primary); }
+        .toggle-input:checked + .toggle-label::after { transform: translateX(20px); }
+
+        /* Global Drag Overlay */
+        #globalDropZone { position: fixed; top: 0; left: 0; width: 100%; height: 100%; background: rgba(59, 130, 246, 0.9); z-index: 2000; display: none; color: white; flex-direction: column; justify-content: center; align-items: center; font-size: 24px; font-weight: bold; }
+        #globalDropZone.active { display: flex; }
+        #globalDropZone p { font-size: 16px; font-weight: normal; margin-top: 10px; }
+    </style>
+</head>
+<body>
+
+    <div id="globalDropZone">
+        <div>📂 アドオンをインポート</div>
+        <p>.mcaddon または .zip ファイルをここにドロップ</p>
+    </div>
+
+    <h1>🖼️ Painting Add-on Generator <small>(Auto-Place)</small></h1>
+
+    <div class="container">
+        <div class="card">
+            <h3>1. アドオン設定</h3>
+            <div class="row">
+                <div class="icon-upload" id="iconDropZone" onclick="document.getElementById('iconInput').click()">
+                    <img id="packIconPreview" src="data:image/svg+xml;base64,PHN2ZyB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciIHZpZXdCb3g9IjAgMCAyNCAyNCIgZmlsbD0ibm9uZSIgc3Ryb2tlPSIjOTk5IiBzdHJva2Utd2lkdGg9IjIiPjxyZWN0IHg9IjMiIHk9IjMiIHdpZHRoPSIxOCIgaGVpZ2h0PSIxOCIgcng9IjIiIHJ5PSIyIi8+PGNpcmNsZSBjeD0iOC41IiBjeT0iOC41IiByPSIxLjUiLz48cG9seWxpbmUgcG9pbnRzPSIyMSAxNSAxNiAxMCA1IDIxIi8+PC9zdmc+" alt="Icon">
+                    <input type="file" id="iconInput" accept="image/*" style="display: none;" onchange="handleIconUpload(event)">
+                </div>
+                <div style="flex: 1;">
+                    <input type="text" id="packName" placeholder="アドオン名 (例: My Paintings)" value="My Paintings">
+                    <input type="text" id="packDesc" placeholder="説明文" style="margin-top: 5px; width: 100%; box-sizing: border-box;" value="カスタム絵画を追加します">
+                </div>
+            </div>
+            <div style="margin-top: 10px; font-size: 0.9em; color: #666;">
+                <input type="file" id="importFile" accept=".mcaddon,.zip" style="display: none;" onchange="handleImportEvent(event)">
+                <button class="secondary" onclick="document.getElementById('importFile').click()" style="padding: 5px 10px; font-size: 12px;">Existing .mcaddon Import</button>
+                <span style="margin-left: 10px;">※既存のアドオンを読み込んで編集できます</span>
+            </div>
+        </div>
+
+        <div class="card">
+            <h3>2. 画像を追加</h3>
+            <div class="drop-zone" id="dropZone" onclick="document.getElementById('fileInput').click()">
+                <p>クリックして画像を選択、またはここにドロップ</p>
+                <i style="font-size: 0.8em; color: #999;">(PNG, JPG, WEBP 対応)</i>
+                <input type="file" id="fileInput" accept="image/*" onchange="handleFileSelect(event)">
+                <img id="previewImage" src="">
+            </div>
+
+            <div id="editControls" style="display: none; margin-top: 15px;">
+                <div class="row">
+                    <input type="text" id="imageName" placeholder="ブロックID (例: monalisa)" oninput="this.value = formatName(this.value)">
+                    <div id="splitToggleGroup" class="toggle-switch">
+                        <input type="checkbox" id="splitToggle" class="toggle-input">
+                        <label for="splitToggle" class="toggle-label"></label>
+                        <span>画像を分割する</span>
+                    </div>
+                </div>
+                <button onclick="processAddImage()" style="width: 100%; margin-top: 10px;">リストに追加</button>
+            </div>
+        </div>
+
+        <div class="card">
+            <div class="row" style="justify-content: space-between;">
+                <h3>3. ブロックリスト (<span id="count">0</span>)</h3>
+                <button class="secondary" onclick="clearAll()" style="padding: 5px 10px; font-size: 12px;">全て削除</button>
+            </div>
+            <div class="gallery" id="gallery"></div>
+        </div>
+
+        <div class="card">
+            <h3>4. エクスポート</h3>
+            <p style="font-size: 0.9em; color: #555;">
+                スクリプトAPI (Script API) を含むアドオンを生成します。<br>
+                ゲーム内で「<b>絵画設置ツール (Painting Wand)</b>」を使って、壁に一括設置できます。<br>
+                ※ワールド設定で「ベータAPI」を有効にする必要がある場合があります。
+            </p>
+            <button class="accent" onclick="exportAddon()" style="width: 100%; font-size: 1.1em;">.mcaddon をダウンロード</button>
+        </div>
+    </div>
+
+    <div class="modal-overlay" id="splitModal">
+        <div class="modal">
+            <h3>分割設定</h3>
+            <div class="split-grid">
+                <div class="row">
+                    <label>横 (Cols):</label>
+                    <input type="number" id="splitCols" value="2" min="1" max="10" onchange="drawSplitPreview()">
+                </div>
+                <div class="row">
+                    <label>縦 (Rows):</label>
+                    <input type="number" id="splitRows" value="2" min="1" max="10" onchange="drawSplitPreview()">
+                </div>
+                <div class="row">
+                    <label>フィット:</label>
+                    <select id="splitFitMode" onchange="drawSplitPreview()">
+                        <option value="cover">Cover (隙間なし・トリミング)</option>
+                        <option value="stretch">Stretch (引き伸ばし)</option>
+                    </select>
+                </div>
+                <canvas id="splitCanvas" style="width: 100%; border: 1px solid #ddd; margin-top: 10px; background: #eee;"></canvas>
+            </div>
+            <div class="row" style="margin-top: 20px; justify-content: flex-end;">
+                <button class="secondary" onclick="closeSplitModal()">キャンセル</button>
+                <button onclick="confirmSplit()">追加</button>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        // --- Core Data ---
+        let images = []; 
+        let currentImageObj = null;
+        let currentEditingFileUrl = null;
+        let packIconDataUrl = null;
+        const MAX_IMAGES = 500; 
+
+        // --- Utils ---
+        function formatName(name) {
+            return name.toLowerCase().replace(/[^a-z0-9_]/g, '_').replace(/^_+|_+$/g, '');
+        }
+
+        function generateDefaultName() {
+            return `painting_${Date.now()}`;
+        }
+
+        function getTotalBlocks() {
+            return images.reduce((acc, img) => acc + (img.isSplit ? img.pieces.length : 1), 0);
+        }
+
+        function isNameUsed(name) {
+            return images.some(img => {
+                if (!img.isSplit) return img.name === name;
+                return img.pieces.some(p => p.name === name);
+            });
+        }
+
+        function closeModal() {
+            document.getElementById('editControls').style.display = 'none';
+            document.getElementById('previewImage').style.display = 'none';
+            document.getElementById('fileInput').value = '';
+            document.querySelector('#dropZone p').style.display = 'block';
+            document.querySelector('#dropZone i').style.display = 'inline';
+        }
+        
+        function closeSplitModal() {
+            document.getElementById('splitModal').classList.remove('active');
+        }
+
+        // --- Gallery Rendering ---
+        function renderGallery() {
+            const container = document.getElementById('gallery');
+            container.innerHTML = '';
+            document.getElementById('count').innerText = getTotalBlocks();
+
+            images.forEach((img, index) => {
+                const div = document.createElement('div');
+                div.className = 'gallery-item';
+                div.onclick = () => renameImage(index);
+                
+                const imgEl = document.createElement('img');
+                imgEl.src = img.dataUrl;
+                
+                const badge = document.createElement('div');
+                badge.className = 'badge';
+                badge.innerText = img.isSplit ? `${img.cols}x${img.rows}` : '1x1';
+
+                const delBtn = document.createElement('div');
+                delBtn.className = 'del-btn';
+                delBtn.innerText = '×';
+                delBtn.onclick = (e) => { e.stopPropagation(); images.splice(index, 1); renderGallery(); };
+
+                div.appendChild(imgEl);
+                div.appendChild(badge);
+                div.appendChild(delBtn);
+                container.appendChild(div);
+            });
+        }
+
+        function clearAll() {
+            if(confirm("リストを空にしますか？")) {
+                images = [];
+                renderGallery();
+            }
+        }
+
+        function renameImage(index) {
+            const imgInfo = images[index];
+            let newName = prompt('新しい基本ブロックID名を入力してください（英数字・アンダーバーのみ）:', imgInfo.name);
+            if (newName !== null) {
+                newName = formatName(newName);
+                if (newName === '') { alert('無効な名前です。'); return; }
+                
+                // 自身を除外して重複チェック
+                const isConflict = images.some((other, i) => i !== index && (other.name === newName || (other.isSplit && other.pieces.some(p => p.name === newName))));
+                if (isConflict) { alert('その名前は既に使用されています。'); return; }
+                
+                imgInfo.name = newName;
+                if (imgInfo.isSplit) {
+                    let i = 0;
+                    for (let r = 0; r < imgInfo.rows; r++) {
+                        for (let c = 0; c < imgInfo.cols; c++) {
+                            imgInfo.pieces[i].name = `${newName}_${getGridName(c, r).toLowerCase()}`;
+                            i++;
+                        }
+                    }
+                }
+                renderGallery();
+            }
+        }
+
+        // --- File Handling (Images) ---
+        const dropZone = document.getElementById('dropZone');
+        
+        // ★修正: イベントの伝播を止めることでグローバルドロップゾーンの誤作動を防ぐ
+        dropZone.addEventListener('dragenter', (e) => { 
+            e.preventDefault(); 
+            e.stopPropagation(); 
+            dropZone.classList.add('dragover'); 
+        });
+        dropZone.addEventListener('dragover', (e) => { 
+            e.preventDefault(); 
+            e.stopPropagation(); 
+            dropZone.classList.add('dragover'); 
+        });
+        dropZone.addEventListener('dragleave', (e) => { 
+            e.preventDefault(); 
+            e.stopPropagation(); 
+            dropZone.classList.remove('dragover'); 
+        });
+        dropZone.addEventListener('drop', (e) => {
+            e.preventDefault(); 
+            e.stopPropagation(); 
+            dropZone.classList.remove('dragover');
+            if (e.dataTransfer.files && e.dataTransfer.files[0]) handleFile(e.dataTransfer.files[0]);
+        });
+
+        function handleFileSelect(e) {
+            if (e.target.files && e.target.files[0]) handleFile(e.target.files[0]);
+        }
+
+        function handleFile(file) {
+            if (!file.type.startsWith('image/')) { alert('画像ファイルを選択してください。'); return; }
+            const reader = new FileReader();
+            reader.onload = (e) => {
+                currentEditingFileUrl = e.target.result;
+                currentImageObj = new Image();
+                currentImageObj.onload = () => {
+                    const preview = document.getElementById('previewImage');
+                    preview.src = currentEditingFileUrl;
+                    preview.style.display = 'block';
+                    document.querySelector('#dropZone p').style.display = 'none';
+                    document.querySelector('#dropZone i').style.display = 'none';
+                    document.getElementById('editControls').style.display = 'block';
+                    document.getElementById('splitToggleGroup').style.display = 'flex';
+                    
+                    const nameInput = document.getElementById('imageName');
+                    if (!nameInput.value) {
+                        let baseName = file.name.split('.')[0];
+                        nameInput.value = formatName(baseName);
+                    }
+                };
+                currentImageObj.src = currentEditingFileUrl;
+            };
+            reader.readAsDataURL(file);
+        }
+
+        // --- Single Image Processing ---
+        function processAddImage() {
+            if (!currentImageObj) { alert('画像を選択してください。'); return; }
+            
+            if (document.getElementById('splitToggle').checked) {
+                document.getElementById('splitModal').classList.add('active');
+                drawSplitPreview();
+                return;
+            }
+            
+            let rawName = document.getElementById('imageName').value;
+            let finalName = rawName ? formatName(rawName) : generateDefaultName();
+            
+            if (isNameUsed(finalName)) {
+                alert('その名前（ID）は既に使用されています。別の名前を入力してください。'); return;
+            }
+            if (getTotalBlocks() + 1 > MAX_IMAGES) {
+                alert(`ブロック数が上限(${MAX_IMAGES})を超えます。`); return;
+            }
+
+            const canvas = document.createElement('canvas');
+            const size = 256; 
+            canvas.width = size; canvas.height = size;
+            const ctx = canvas.getContext('2d');
+            
+            ctx.clearRect(0, 0, size, size);
+            const scale = Math.min(size / currentImageObj.width, size / currentImageObj.height);
+            const w = currentImageObj.width * scale;
+            const h = currentImageObj.height * scale;
+            const x = (size - w) / 2;
+            const y = (size - h) / 2;
+            
+            ctx.drawImage(currentImageObj, x, y, w, h);
+            
+            images.push({ isSplit: false, name: finalName, dataUrl: canvas.toDataURL('image/png') });
+            renderGallery();
+            closeModal();
+        }
+
+        // --- Split Image Processing ---
+        function getColName(colIndex) {
+            let name = '';
+            let temp = colIndex;
+            while (temp >= 0) {
+                name = String.fromCharCode(65 + (temp % 26)) + name;
+                temp = Math.floor(temp / 26) - 1;
+            }
+            return name;
+        }
+        function getGridName(c, r) { return `${getColName(c)}${r + 1}`; }
+
+        function drawSplitPreview() {
+            if (!currentImageObj) return;
+            const cols = parseInt(document.getElementById('splitCols').value) || 1;
+            const rows = parseInt(document.getElementById('splitRows').value) || 1;
+            const fitMode = document.getElementById('splitFitMode').value;
+            
+            const canvas = document.getElementById('splitCanvas');
+            const ctx = canvas.getContext('2d');
+            
+            const blockSz = 256;
+            const targetW = cols * blockSz;
+            const targetH = rows * blockSz;
+            
+            canvas.width = targetW; canvas.height = targetH;
+            ctx.clearRect(0, 0, targetW, targetH);
+            
+            if (fitMode === 'stretch') {
+                ctx.drawImage(currentImageObj, 0, 0, targetW, targetH);
+            } else { // cover
+                const scale = Math.max(targetW / currentImageObj.width, targetH / currentImageObj.height);
+                const drawW = currentImageObj.width * scale;
+                const drawH = currentImageObj.height * scale;
+                const x = (targetW - drawW) / 2;
+                const y = (targetH - drawH) / 2;
+                ctx.drawImage(currentImageObj, x, y, drawW, drawH);
+            }
+            
+            ctx.strokeStyle = 'rgba(255, 0, 0, 0.8)';
+            ctx.lineWidth = 4;
+            ctx.font = 'bold 48px sans-serif';
+            ctx.fillStyle = 'white';
+            ctx.textAlign = 'center';
+            ctx.textBaseline = 'middle';
+            ctx.shadowColor = "black"; ctx.shadowBlur = 4; ctx.shadowLineWidth = 4;
+            
+            for (let r = 0; r < rows; r++) {
+                for (let c = 0; c < cols; c++) {
+                    ctx.strokeRect(c * blockSz, r * blockSz, blockSz, blockSz);
+                    ctx.fillText(getGridName(c, r), c * blockSz + blockSz / 2, r * blockSz + blockSz / 2);
+                }
+            }
+        }
+
+        function confirmSplit() {
+            const cols = parseInt(document.getElementById('splitCols').value) || 1;
+            const rows = parseInt(document.getElementById('splitRows').value) || 1;
+            const fitMode = document.getElementById('splitFitMode').value;
+            
+            if (getTotalBlocks() + (cols * rows) > MAX_IMAGES) {
+                alert(`ブロック数が上限(${MAX_IMAGES})を超えます。`); return;
+            }
+            
+            let baseName = formatName(document.getElementById('imageName').value) || generateDefaultName();
+            if (isNameUsed(baseName)) { alert('その名前（ID）は既に使用されています。'); return; }
+
+            const blockSz = 256;
+            const targetW = cols * blockSz; const targetH = rows * blockSz;
+            
+            const tempCanvas = document.createElement('canvas');
+            tempCanvas.width = targetW; tempCanvas.height = targetH;
+            const tempCtx = tempCanvas.getContext('2d');
+            
+            if (fitMode === 'stretch') {
+                tempCtx.drawImage(currentImageObj, 0, 0, targetW, targetH);
+            } else {
+                const scale = Math.max(targetW / currentImageObj.width, targetH / currentImageObj.height);
+                const drawW = currentImageObj.width * scale; const drawH = currentImageObj.height * scale;
+                const x = (targetW - drawW) / 2; const y = (targetH - drawH) / 2;
+                tempCtx.drawImage(currentImageObj, x, y, drawW, drawH);
+            }
+            
+            const previewDataUrl = document.getElementById('splitCanvas').toDataURL('image/jpeg', 0.8);
+            const pieces = [];
+            const pieceCanvas = document.createElement('canvas');
+            pieceCanvas.width = blockSz; pieceCanvas.height = blockSz;
+            const pCtx = pieceCanvas.getContext('2d');
+            
+            for (let r = 0; r < rows; r++) {
+                for (let c = 0; c < cols; c++) {
+                    pCtx.clearRect(0, 0, blockSz, blockSz);
+                    pCtx.drawImage(tempCanvas, c * blockSz, r * blockSz, blockSz, blockSz, 0, 0, blockSz, blockSz);
+                    pieces.push({
+                        name: `${baseName}_${getGridName(c, r).toLowerCase()}`,
+                        dataUrl: pieceCanvas.toDataURL('image/png')
+                    });
+                }
+            }
+            
+            images.push({ isSplit: true, name: baseName, dataUrl: previewDataUrl, cols: cols, rows: rows, pieces: pieces });
+            renderGallery();
+            closeSplitModal(); closeModal();
+        }
+
+        // --- Global Drag & Drop for Add-on Import ---
+        const globalDropZone = document.getElementById('globalDropZone');
+        let dragCounter = 0;
+
+        // ★修正: アイコンエリアにもドラッグ&ドロップイベントを追加し、伝播を止める
+        const iconDropZone = document.getElementById('iconDropZone');
+        const iconInput = document.getElementById('iconInput');
+
+        iconDropZone.addEventListener('dragenter', (e) => { e.preventDefault(); e.stopPropagation(); });
+        iconDropZone.addEventListener('dragover', (e) => { e.preventDefault(); e.stopPropagation(); });
+        iconDropZone.addEventListener('drop', (e) => {
+            e.preventDefault(); e.stopPropagation();
+            if (e.dataTransfer.files && e.dataTransfer.files[0]) {
+                const file = e.dataTransfer.files[0];
+                const dummyEvent = { target: { files: [file] } };
+                handleIconUpload(dummyEvent);
+            }
+        });
+
+        // Global listeners
+        window.addEventListener('dragenter', (e) => {
+            e.preventDefault();
+            // ★修正: 特定のドロップゾーンに入っている場合はグローバル表示を出さない
+            if (e.target.closest('.drop-zone') || e.target.closest('.icon-upload')) return;
+            
+            dragCounter++;
+            if(e.dataTransfer.types.includes("Files")) globalDropZone.classList.add('active');
+        });
+        window.addEventListener('dragleave', (e) => {
+            e.preventDefault();
+            if (e.target.closest('.drop-zone') || e.target.closest('.icon-upload')) return;
+
+            dragCounter--;
+            if (dragCounter <= 0) {
+                globalDropZone.classList.remove('active');
+                dragCounter = 0;
+            }
+        });
+        window.addEventListener('dragover', (e) => e.preventDefault());
+        window.addEventListener('drop', (e) => {
+            e.preventDefault(); 
+            dragCounter = 0; 
+            globalDropZone.classList.remove('active');
+            
+            if (e.target.closest('.drop-zone') || e.target.closest('.icon-upload')) return;
+
+            if (e.dataTransfer.files && e.dataTransfer.files[0]) {
+                const file = e.dataTransfer.files[0];
+                if (file.name.endsWith('.mcaddon') || file.name.endsWith('.zip')) {
+                    handleImportFile(file);
+                }
+            }
+        });
+
+        function handleImportEvent(event) {
+            if (event.target.files[0]) handleImportFile(event.target.files[0]);
+        }
+
+        async function handleImportFile(file) {
+            try {
+                const zip = await JSZip.loadAsync(file);
+                
+                if (!document.getElementById('packName').value && zip.file("RP/manifest.json")) {
+                    const rpManifest = JSON.parse(await zip.file("RP/manifest.json").async("string"));
+                    document.getElementById('packName').value = rpManifest.header.name.replace(" RP", "");
+                    document.getElementById('packDesc').value = rpManifest.header.description;
+                }
+                if (!packIconDataUrl && zip.file("RP/pack_icon.png")) {
+                    packIconDataUrl = `data:image/png;base64,${await zip.file("RP/pack_icon.png").async("base64")}`;
+                    document.getElementById('packIconPreview').src = packIconDataUrl;
+                }
+
+                const imagePromises = [];
+                zip.folder("RP/textures/blocks").forEach((relativePath, fileObj) => {
+                    if (relativePath.endsWith('.png')) {
+                        const name = relativePath.replace('.png', '');
+                        if (!isNameUsed(name) && getTotalBlocks() + imagePromises.length < MAX_IMAGES) {
+                            imagePromises.push(fileObj.async("base64").then(b64 => ({ 
+                                isSplit: false, name: name, dataUrl: `data:image/png;base64,${b64}` 
+                            })));
+                        }
+                    }
+                });
+
+                const newImages = await Promise.all(imagePromises);
+                newImages.forEach(img => { if (getTotalBlocks() < MAX_IMAGES) images.push(img); });
+                
+                renderGallery();
+                document.getElementById('importFile').value = '';
+                alert(`${newImages.length}個のブロックを読み込みました。\n※スクリプトAPIのデータは復元されず、単体ブロックとして扱われます。`);
+            } catch (err) {
+                alert("読み込みに失敗しました。正しいmcaddonファイルか確認してください。"); console.error(err);
+            }
+        }
+
+        // --- Icon Upload ---
+        function handleIconUpload(e) {
+            const file = e.target.files[0];
+            if (file && file.type.startsWith('image/')) {
+                const reader = new FileReader();
+                reader.onload = (ev) => {
+                    const img = new Image();
+                    img.onload = () => {
+                        const canvas = document.createElement('canvas');
+                        canvas.width = 128; canvas.height = 128;
+                        canvas.getContext('2d').drawImage(img, 0, 0, 128, 128);
+                        packIconDataUrl = canvas.toDataURL('image/png');
+                        document.getElementById('packIconPreview').src = packIconDataUrl;
+                    };
+                    img.src = ev.target.result;
+                };
+                reader.readAsDataURL(file);
+            }
+        }
+
+        // --- UUID Generator ---
+        function generateUUID() {
+            return 'xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx'.replace(/[xy]/g, function(c) {
+                var r = Math.random() * 16 | 0, v = c == 'x' ? r : (r & 0x3 | 0x8);
+                return v.toString(16);
+            });
+        }
+
+        // --- Export Add-on with Script API & Wand Feature ---
+        async function exportAddon() {
+            if (images.length === 0) { alert('画像が一つも追加されていません。'); return; }
+
+            const packNameInput = document.getElementById('packName').value.trim() || 'Custom Paintings';
+            const packDescInput = document.getElementById('packDesc').value.trim() || 'カスタム絵画ブロックを追加するアドオンです';
+            const packUUID_BP = generateUUID();
+            const packUUID_RP = generateUUID();
+            const packUUID_Script = generateUUID();
+
+            const zip = new JSZip();
+            const bp = zip.folder("BP");
+            const rp = zip.folder("RP");
+
+            // --- 1. データ準備 ---
+            const allBlocks = [];
+            const scriptData = [];
+
+            images.forEach(img => {
+                if (img.isSplit) {
+                    allBlocks.push(...img.pieces);
+                    scriptData.push({ id: img.name, name: img.name, cols: img.cols, rows: img.rows, isSplit: true });
+                } else {
+                    allBlocks.push({ name: img.name, dataUrl: img.dataUrl });
+                    scriptData.push({ id: img.name, name: img.name, cols: 1, rows: 1, isSplit: false });
+                }
+            });
+
+            // --- 2. Manifests ---
+            bp.file("manifest.json", JSON.stringify({
+                "format_version": 2,
+                "header": { "name": `${packNameInput} BP`, "description": packDescInput, "uuid": packUUID_BP, "version": [1, 0, 0], "min_engine_version": [1, 20, 80] },
+                "modules": [
+                    { "type": "data", "uuid": generateUUID(), "version": [1, 0, 0] },
+                    { "type": "script", "language": "javascript", "uuid": packUUID_Script, "entry": "scripts/main.js", "version": [1, 0, 0] }
+                ],
+                "dependencies": [
+                    { "uuid": packUUID_RP, "version": [1, 0, 0] },
+                    { "module_name": "@minecraft/server", "version": "1.10.0" },
+                    { "module_name": "@minecraft/server-ui", "version": "1.2.0" }
+                ]
+            }, null, 2));
+
+            rp.file("manifest.json", JSON.stringify({
+                "format_version": 2,
+                "header": { "name": `${packNameInput} RP`, "description": packDescInput, "uuid": packUUID_RP, "version": [1, 0, 0], "min_engine_version": [1, 20, 80] },
+                "modules": [{ "type": "resources", "uuid": generateUUID(), "version": [1, 0, 0] }]
+            }, null, 2));
+
+            // --- 3. アイコン ---
+            let iconBase64 = packIconDataUrl ? packIconDataUrl.split(',')[1] : "iVBORw0KGgoAAAANSUhEUgAAAIAAAACAAQMAAAD58POIAAAAA1BMVEUAAACnej3aAAAAAXRSTlMAQObYZgAAABtJREFUWIXtwQENAAAAwiD7p7bHBwwAAAAA4G0OwgAB/wG1qAAAAABJRU5ErkJggg==";
+            rp.file("pack_icon.png", iconBase64, {base64: true});
+            bp.file("pack_icon.png", iconBase64, {base64: true});
+
+            // --- 4. ブロック定義 (BP/RP) ---
+            const bpBlocks = bp.folder("blocks");
+            allBlocks.forEach(block => {
+                bpBlocks.file(`${block.name}.json`, JSON.stringify({
+                    "format_version": "1.20.80",
+                    "minecraft:block": {
+                        "description": { 
+                            "identifier": `myimage:${block.name}`,
+                            "menu_category": { "category": "construction", "group": "itemGroup.name.decoration" },
+                            "traits": { "minecraft:placement_direction": { "enabled_states": ["minecraft:cardinal_direction"] } }
+                        },
+                        "components": {
+                            "minecraft:geometry": { "identifier": "geometry.painting_1px" },
+                            "minecraft:material_instances": { "*": { "texture": block.name, "render_method": "alpha_test", "ambient_occlusion": false } },
+                            "minecraft:collision_box": { "origin": [-8, 0, -8], "size": [16, 16, 1] },
+                            "minecraft:selection_box": { "origin": [-8, 0, -8], "size": [16, 16, 1] },
+                            "minecraft:light_dampening": 0,
+                            "minecraft:destructible_by_mining": { "seconds_to_destroy": 0.5 }
+                        },
+                        "permutations": [
+                            { "condition": "query.block_state('minecraft:cardinal_direction') == 'north'", "components": { "minecraft:transformation": { "rotation": [0, 0, 0] } } },
+                            { "condition": "query.block_state('minecraft:cardinal_direction') == 'south'", "components": { "minecraft:transformation": { "rotation": [0, 180, 0] } } },
+                            { "condition": "query.block_state('minecraft:cardinal_direction') == 'west'",  "components": { "minecraft:transformation": { "rotation": [0, 90, 0] } } },
+                            { "condition": "query.block_state('minecraft:cardinal_direction') == 'east'",  "components": { "minecraft:transformation": { "rotation": [0, -90, 0] } } }
+                        ]
+                    }
+                }, null, 2));
+            });
+
+            rp.folder("models").folder("blocks").file("painting_1px.geo.json", JSON.stringify({
+                "format_version": "1.12.0",
+                "minecraft:geometry": [{
+                    "description": { "identifier": "geometry.painting_1px", "texture_width": 16, "texture_height": 16, "visible_bounds_width": 2, "visible_bounds_height": 3, "visible_bounds_offset": [0, 0.5, 0] },
+                    "bones": [{ "name": "bb_main", "pivot": [0, 0, 0], "cubes": [{ "origin": [-8, 0, -8], "size": [16, 16, 1], "uv": { "north": {"uv": [16, 0], "uv_size": [-16, 16]}, "east": {"uv": [0, 0], "uv_size": [1, 1]}, "south": {"uv": [0, 0], "uv_size": [16, 16]}, "west": {"uv": [15, 0], "uv_size": [1, 1]}, "up": {"uv": [0, 0], "uv_size": [1, 1]}, "down": {"uv": [0, 16], "uv_size": [1, -1]} } }] }]
+                }]
+            }, null, 2));
+
+            const rpTextures = rp.folder("textures").folder("blocks");
+            const terrainTexture = { "resource_pack_name": "custom_paintings", "texture_name": "atlas.terrain", "padding": 8, "num_mip_levels": 4, "texture_data": {} };
+            const blocksJson = { "format_version": "1.1.0" };
+            let langContent = `pack.name=${packNameInput}\npack.description=${packDescInput}\n`;
+
+            allBlocks.forEach(block => {
+                rpTextures.file(`${block.name}.png`, block.dataUrl.split(',')[1], {base64: true});
+                terrainTexture.texture_data[block.name] = { "textures": `textures/blocks/${block.name}` };
+                blocksJson[`myimage:${block.name}`] = { "textures": block.name, "sound": "wood" };
+                langContent += `tile.myimage:${block.name}.name=${block.name}\n`;
+            });
+
+            // --- 5. Wand ---
+            bp.folder("items").file("painting_wand.json", JSON.stringify({
+                "format_version": "1.20.50",
+                "minecraft:item": {
+                    "description": { "identifier": "myimage:painting_wand", "menu_category": { "category": "items" } },
+                    "components": { "minecraft:icon": "painting_wand", "minecraft:display_name": { "value": "§b絵画設置ツール" }, "minecraft:max_stack_size": 1, "minecraft:cooldown": { "category": "painting_wand", "duration": 0.5 } }
+                }
+            }, null, 2));
+            
+            const itemTextureJson = { "resource_pack_name": "custom_paintings", "texture_name": "atlas.items", "texture_data": { "painting_wand": { "textures": "textures/items/painting_wand" } } };
+            rp.folder("textures").file("item_texture.json", JSON.stringify(itemTextureJson, null, 2));
+            
+            const wandCanvas = document.createElement('canvas');
+            wandCanvas.width = 16; wandCanvas.height = 16;
+            const wCtx = wandCanvas.getContext('2d');
+            wCtx.clearRect(0,0,16,16);
+            wCtx.translate(8, 8); wCtx.rotate(45 * Math.PI / 180); wCtx.translate(-8, -8);
+            wCtx.fillStyle = '#8B4513'; wCtx.fillRect(6, 6, 4, 10);
+            wCtx.fillStyle = '#FFD700'; wCtx.beginPath(); wCtx.arc(8, 5, 3, 0, Math.PI * 2); wCtx.fill();
+            wCtx.fillStyle = '#00FFFF'; wCtx.beginPath(); wCtx.arc(8, 5, 1.5, 0, Math.PI * 2); wCtx.fill();
+            
+            rp.folder("textures").folder("items").file("painting_wand.png", wandCanvas.toDataURL().split(',')[1], {base64: true});
+            langContent += `item.myimage:painting_wand.name=§b絵画設置ツール§r\n`;
+
+            rp.folder("textures").file("terrain_texture.json", JSON.stringify(terrainTexture, null, 2));
+            rp.file("blocks.json", JSON.stringify(blocksJson, null, 2));
+            const texts = rp.folder("texts");
+            texts.file("en_US.lang", langContent);
+            texts.file("ja_JP.lang", langContent);
+            texts.file("languages.json", JSON.stringify(["en_US", "ja_JP"], null, 2));
+
+            // --- 6. Scripts ---
+            const scripts = bp.folder("scripts");
+            scripts.file("data.js", `export const imageDatabase = ${JSON.stringify(scriptData, null, 2)};`);
+
+            // ★ UPDATE: villager_happy に戻し、時間は10秒(50*4ticks)
+            const mainJsContent = `
+import { world, system } from "@minecraft/server";
+import { ModalFormData, ActionFormData } from "@minecraft/server-ui";
+import { imageDatabase } from "./data.js";
+
+world.beforeEvents.itemUse.subscribe((event) => {
+    if (event.itemStack.typeId === "myimage:painting_wand") {
+        system.run(() => {
+            showPaintingUI(event.source);
+        });
+    }
+});
+
+function showPaintingUI(player) {
+    const form = new ActionFormData()
+        .title("絵画設置メニュー")
+        .body("設置したい絵画を選択してください。\\nプレビューで枠を確認してから設置できます。");
+
+    imageDatabase.forEach(img => {
+        let desc = img.isSplit ? \`\${img.cols}x\${img.rows} 分割\` : "単体ブロック";
+        form.button(\`\${img.name}\\n\${desc}\`);
+    });
+
+    form.show(player).then(response => {
+        if (response.canceled) return;
+        const selectedImage = imageDatabase[response.selection];
+        showPlacementOptions(player, selectedImage);
+    });
+}
+
+function showPlacementOptions(player, image) {
+    const form = new ModalFormData()
+        .title(\`設置: \${image.name}\`);
+
+    form.slider("横方向のオフセット (右/左)", -5, 5, 1, 0);
+    form.slider("高さのオフセット (上/下)", -5, 5, 1, 1);
+    form.toggle("§eプレビューを表示する (枠線)", true);
+    form.toggle("§c!! 設置を実行する !!", false);
+
+    form.show(player).then(res => {
+        if (res.canceled) return;
+        const [offsetX, offsetY, showPreview, doPlace] = res.formValues;
+
+        if (showPreview) {
+            runPreview(player, image, offsetX, offsetY);
+        }
+        
+        if (doPlace) {
+            placePainting(player, image, offsetX, offsetY);
+        }
+    });
+}
+
+function getGridName(c, r) {
+    let name = '';
+    let temp = c;
+    while (temp >= 0) {
+        name = String.fromCharCode(65 + (temp % 26)) + name;
+        temp = Math.floor(temp / 26) - 1;
+    }
+    return \`\${name}\${r + 1}\`;
+}
+
+function getCardinalDirection(player) {
+    const view = player.getViewDirection();
+    if (Math.abs(view.x) > Math.abs(view.z)) {
+        return view.x > 0 ? "east" : "west";
+    } else {
+        return view.z > 0 ? "south" : "north";
+    }
+}
+
+// プレビュー表示
+function runPreview(player, image, offX, offY) {
+    let ticks = 0;
+    // 50回ループ * 4ticks間隔 = 200ticks = 10秒
+    const runner = system.runInterval(() => {
+        if (ticks++ > 50) { system.clearRun(runner); return; } 
+
+        const dim = player.dimension;
+        const headLoc = player.getHeadLocation();
+        const cardinal = getCardinalDirection(player);
+
+        let vecRight = {x:0, z:0};
+        let vecNormal = {x:0, z:0};
+
+        if (cardinal === "north") { vecRight = {x:1, z:0}; vecNormal = {x:0, z:-1}; } 
+        else if (cardinal === "south") { vecRight = {x:-1, z:0}; vecNormal = {x:0, z:1}; }
+        else if (cardinal === "west") { vecRight = {x:0, z:-1}; vecNormal = {x:-1, z:0}; }
+        else if (cardinal === "east") { vecRight = {x:0, z:1}; vecNormal = {x:1, z:0}; }
+
+        // 原点計算 (足元 + 前方2ブロック + Y調整-2)
+        let originX = Math.floor(headLoc.x) + (vecNormal.x * 2);
+        let originY = Math.floor(headLoc.y + offY - 2); 
+        let originZ = Math.floor(headLoc.z) + (vecNormal.z * 2);
+
+        originX += vecRight.x * offX;
+        originZ += vecRight.z * offX;
+
+        const width = image.cols;
+        const height = image.rows;
+
+        // 枠線の描画: minecraft:villager_happy に戻す
+        for (let w = 0; w <= width; w++) {
+             for (let h = 0; h <= height; h+=0.5) {
+                 if (w === 0 || w === width || h === 0 || h === height) {
+                     dim.spawnParticle("minecraft:villager_happy", {
+                         x: originX + (vecRight.x * w) + 0.5,
+                         y: originY + h + 0.5,
+                         z: originZ + (vecRight.z * w) + 0.5
+                     });
+                 }
+             }
+        }
+    }, 4);
+    player.sendMessage("§eプレビューを表示します(10秒間)");
+}
+
+// 実際の設置
+function placePainting(player, image, offX, offY) {
+    const dim = player.dimension;
+    const headLoc = player.getHeadLocation();
+    const cardinal = getCardinalDirection(player);
+
+    let vecRight = {x:0, z:0};
+    let vecNormal = {x:0, z:0}; 
+    let blockFacing = "north";
+
+    if (cardinal === "north") { vecRight = {x:1, z:0}; vecNormal = {x:0, z:-1}; blockFacing = "north"; } 
+    else if (cardinal === "south") { vecRight = {x:-1, z:0}; vecNormal = {x:0, z:1}; blockFacing = "south"; }
+    else if (cardinal === "west") { vecRight = {x:0, z:-1}; vecNormal = {x:-1, z:0}; blockFacing = "west"; }
+    else if (cardinal === "east") { vecRight = {x:0, z:1}; vecNormal = {x:1, z:0}; blockFacing = "east"; }
+
+    let originX = Math.floor(headLoc.x) + (vecNormal.x * 2);
+    let originY = Math.floor(headLoc.y + offY - 2); // 設置時も同様に2ブロック下げる
+    let originZ = Math.floor(headLoc.z) + (vecNormal.z * 2);
+
+    originX += vecRight.x * offX;
+    originZ += vecRight.z * offX;
+
+    let placedCount = 0;
+    
+    if (image.isSplit) {
+        for (let r = 0; r < image.rows; r++) {
+            for (let c = 0; c < image.cols; c++) {
+                const blockName = \`myimage:\${image.name}_\${getGridName(c, r).toLowerCase()}\`;
+                const targetX = originX + (vecRight.x * c);
+                const targetY = originY + (image.rows - 1 - r);
+                const targetZ = originZ + (vecRight.z * c);
+
+                try {
+                    const block = dim.getBlock({x: targetX, y: targetY, z: targetZ});
+                    if (block) {
+                        block.setType(blockName);
+                        const perm = block.permutation.withState("minecraft:cardinal_direction", blockFacing);
+                        block.setPermutation(perm);
+                        placedCount++;
+                    }
+                } catch (e) { }
+            }
+        }
+    } else {
+        const blockName = \`myimage:\${image.name}\`;
+        try {
+            const block = dim.getBlock({x: originX, y: originY, z: originZ});
+            if (block) {
+                block.setType(blockName);
+                const perm = block.permutation.withState("minecraft:cardinal_direction", blockFacing);
+                block.setPermutation(perm);
+                placedCount = 1;
+            }
+        } catch(e){}
+    }
+
+    player.sendMessage(\`§a設置完了: \${image.name} (\${placedCount}ブロック)\`);
+    player.playSound("random.levelup");
+}
+`;
+            scripts.file("main.js", mainJsContent);
+
+            // --- 7. Zip生成 ---
+            zip.generateAsync({type:"blob"}).then(function(content) {
+                const link = document.createElement('a');
+                link.href = URL.createObjectURL(content);
+                link.download = `${packNameInput.replace(/\s+/g, '_')}_Addon.mcaddon`;
+                link.click();
+            });
+        }
+    </script>
+</body>
+</html>
